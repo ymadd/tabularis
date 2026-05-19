@@ -64,7 +64,7 @@ import {
   ExportProgressModal,
   type ExportStatus,
 } from "../components/modals/ExportProgressModal";
-import { splitQueries, extractTableName, getExplainableQueries } from "../utils/sql";
+import { splitQueries, extractTableName, getExplainableQueries, stripLeadingSqlComments } from "../utils/sql";
 import {
   createResultEntries,
   updateResultEntry,
@@ -2525,7 +2525,9 @@ export const Editor = () => {
                           {t("editor.noValidQueries")}
                         </div>
                       ) : (
-                        dropdownQueries.map((q, i) => (
+                        dropdownQueries.map((q, i) => {
+                          const label = stripLeadingSqlComments(q) || q;
+                          return (
                           <div
                             key={i}
                             className="flex items-center border-b border-strong/50 last:border-0 hover:bg-surface-tertiary/50 transition-colors group"
@@ -2538,7 +2540,7 @@ export const Editor = () => {
                               className="text-left px-4 py-2 text-xs font-mono text-secondary hover:text-white flex-1 truncate"
                               title={q}
                             >
-                              {q}
+                              {label}
                             </button>
                             <button
                               onClick={(e) => {
@@ -2552,7 +2554,8 @@ export const Editor = () => {
                               <Save size={14} />
                             </button>
                           </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </>
