@@ -1,0 +1,170 @@
+import { describe, it, expect } from 'vitest';
+import { splitStatements, splitQueries } from '../../../src/utils/sqlSplitter';
+
+describe('splitStatements', () => {
+  describe('#223 — comment-only fragments fold', () => {
+    it('folds trailing inline comment into the preceding statement (the bug)', () => {
+      const sql = [
+        '-- ============================================',
+        '-- Any header comment block',
+        '-- ============================================',
+        'SELECT * FROM big_table ORDER BY id;  -- 500+ rows',
+      ].join('\n');
+      const result = splitStatements(sql);
+      expect(result).toHaveLength(1);
+      expect(result[0].text).toContain('SELECT * FROM big_table ORDER BY id');
+      expect(result[0].text).toContain('-- 500+ rows');
+      expect(result[0].text).toContain('Any header comment block');
+    });
+
+    it('folds a mid-input comment-only fragment into the NEXT statement', () => {
+      const sql = 'SELECT 1; /* mid */ ; SELECT 2;';
+      const result = splitStatements(sql);
+      expect(result).toHaveLength(2);
+      expect(result[0].text).toBe('SELECT 1');
+      expect(result[1].text).toContain('/* mid */');
+      expect(result[1].text).toContain('SELECT 2');
+    });
+
+    it('returns an empty array when the input has only comments', () => {
+      expect(splitStatements('-- only')).toEqual([]);
+      expect(splitStatements('/* only */')).toEqual([]);
+      expect(splitStatements('-- a\n/* b */\n-- c\n')).toEqual([]);
+    });
+
+    it('preserves the original behavior for leading comments', () => {
+      const sql = '-- header\nSELECT 1;';
+      const result = splitStatements(sql);
+      expect(result).toHaveLength(1);
+      expect(result[0].text).toContain('-- header');
+      expect(result[0].text).toContain('SELECT 1');
+    });
+  });
+
+  describe('basic splitting', () => {
+    it('splits two statements by semicolon', () => {
+      const result = splitQueries('SELECT 1; SELECT 2;');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+    });
+
+    it('handles a single statement with no terminator', () => {
+      expect(splitQueries('SELECT 1')).toEqual(['SELECT 1']);
+    });
+
+    it('returns [] for empty input', () => {
+      expect(splitQueries('')).toEqual([]);
+      expect(splitQueries('   \n\t  ')).toEqual([]);
+    });
+
+    it('ignores semicolons inside single-quoted strings', () => {
+      const result = splitQueries("SELECT * FROM t WHERE n = 'a;b'; SELECT 2");
+      expect(result).toHaveLength(2);
+      expect(result[0]).toBe("SELECT * FROM t WHERE n = 'a;b'");
+      expect(result[1]).toBe('SELECT 2');
+    });
+
+    it('ignores semicolons inside double-quoted identifiers', () => {
+      const result = splitQueries('SELECT "a;b" FROM t; SELECT 2');
+      expect(result).toHaveLength(2);
+    });
+
+    it('ignores semicolons inside block comments', () => {
+      const result = splitQueries('SELECT 1 /* ; */; SELECT 2');
+      expect(result).toEqual(['SELECT 1 /* ; */', 'SELECT 2']);
+    });
+  });
+
+  describe('postgres dollar-quoting', () => {
+    it('treats semicolons inside $$ ... $$ as data', () => {
+      const sql = 'DO $$ BEGIN PERFORM 1; PERFORM 2; END $$;';
+      const result = splitStatements(sql);
+      expect(result).toHaveLength(1);
+      expect(result[0].text).toContain('PERFORM 1');
+      expect(result[0].text).toContain('PERFORM 2');
+    });
+
+    it('respects $tag$ ... $tag$ delimiters', () => {
+      const sql = 'DO $body$ SELECT 1; SELECT 2 $body$; SELECT 3;';
+      const result = splitQueries(sql);
+      expect(result).toHaveLength(2);
+      expect(result[0]).toContain('$body$');
+      expect(result[1]).toBe('SELECT 3');
+    });
+  });
+
+  describe('mysql custom delimiter round-trip', () => {
+    it('handles DELIMITER // then back to ;', () => {
+      const sql = [
+        'DELIMITER //',
+        'SELECT 1//',
+        'SELECT 2//',
+        'DELIMITER ;',
+        'SELECT 3;',
+      ].join('\n');
+      const result = splitQueries(sql, 'mysql');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2', 'SELECT 3']);
+    });
+  });
+
+  describe('mssql GO separator', () => {
+    it('splits on a line-leading GO', () => {
+      const sql = 'SELECT 1\nGO\nSELECT 2';
+      const result = splitQueries(sql, 'mssql');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+    });
+
+    it('does not split when GO is inside a string literal', () => {
+      const sql = "SELECT 'GO' FROM t";
+      const result = splitQueries(sql, 'mssql');
+      expect(result).toEqual(["SELECT 'GO' FROM t"]);
+    });
+
+    it('does not split when GO is mid-line', () => {
+      const sql = 'SELECT 1 GO SELECT 2';
+      const result = splitQueries(sql, 'mssql');
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('statement metadata', () => {
+    it('annotates SELECT as isSelect / returnsResultSet / isExplainable', () => {
+      const [stmt] = splitStatements('SELECT 1;');
+      expect(stmt.isSelect).toBe(true);
+      expect(stmt.returnsResultSet).toBe(true);
+      expect(stmt.isExplainable).toBe(true);
+    });
+
+    it('annotates DDL as none of those', () => {
+      const [stmt] = splitStatements('CREATE TABLE t (id INT);');
+      expect(stmt.isSelect).toBe(false);
+      expect(stmt.returnsResultSet).toBe(false);
+      expect(stmt.isExplainable).toBe(false);
+    });
+
+    it('annotates UPDATE as explainable but not returning result set', () => {
+      const [stmt] = splitStatements("UPDATE t SET x = 1 WHERE id = 2;");
+      expect(stmt.isSelect).toBe(false);
+      expect(stmt.returnsResultSet).toBe(false);
+      expect(stmt.isExplainable).toBe(true);
+    });
+  });
+
+  describe('range', () => {
+    it('reports source byte offsets for the emitted statement', () => {
+      const sql = 'SELECT 1; SELECT 2';
+      const [a, b] = splitStatements(sql);
+      expect(a.range.start).toBe(0);
+      expect(a.range.end).toBe(8); // up to but excluding `;`
+      expect(b.range.start).toBe(9); // ` SELECT 2`
+      expect(b.range.end).toBe(sql.length);
+    });
+  });
+
+  describe('unterminated lenience', () => {
+    it('emits an unterminated string as part of its statement', () => {
+      const result = splitQueries("SELECT 'never closes");
+      expect(result).toHaveLength(1);
+      expect(result[0]).toContain('SELECT');
+    });
+  });
+});
