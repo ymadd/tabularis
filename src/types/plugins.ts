@@ -29,6 +29,12 @@ export interface DriverCapabilities {
   readonly?: boolean;
   /** Supports listing and managing database triggers. Defaults to false. */
   triggers?: boolean;
+  /**
+   * SQL dialect for the statement splitter / classifier. Plugins that
+   * omit the field fall back to "postgres" (the dialect everyone got
+   * implicitly via the previous splitter).
+   */
+  sql_dialect?: "postgres" | "mysql" | "mssql" | "sqlite" | "oracle" | "generic";
 }
 
 export type PluginSettingType = "string" | "boolean" | "number" | "select";
