@@ -1,29 +1,14 @@
-import { splitQuery, postgreSplitterOptions } from 'dbgate-query-splitter';
+import { splitStatements, stripLeadingComments, isExplainable } from './sqlSplitter';
 
 export function splitQueries(sql: string): string[] {
-  return splitQuery(sql, postgreSplitterOptions).map(item => typeof item == "string" ? item : item.text);
+  return splitStatements(sql).map((s) => s.text);
 }
 
 /**
  * Strip leading SQL comments (single-line and block comments) and whitespace
  * so that the first keyword of the actual statement is at position 0.
  */
-export function stripLeadingSqlComments(query: string): string {
-  let s = query;
-  for (;;) {
-    s = s.trimStart();
-    if (s.startsWith("--")) {
-      const nl = s.indexOf("\n");
-      s = nl === -1 ? "" : s.slice(nl + 1);
-    } else if (s.startsWith("/*")) {
-      const end = s.indexOf("*/");
-      s = end === -1 ? "" : s.slice(end + 2);
-    } else {
-      break;
-    }
-  }
-  return s;
-}
+export const stripLeadingSqlComments = stripLeadingComments;
 
 /**
  * Check if a SQL statement supports EXPLAIN.
@@ -32,33 +17,21 @@ export function stripLeadingSqlComments(query: string): string {
  * and CTEs (WITH). DDL statements (CREATE, DROP, ALTER, TRUNCATE, etc.) are not supported.
  * Leading SQL comments are stripped before checking.
  */
-export function isExplainableQuery(query: string): boolean {
-  const upper = stripLeadingSqlComments(query).toUpperCase();
-  return (
-    upper.startsWith("SELECT") ||
-    upper.startsWith("INSERT") ||
-    upper.startsWith("UPDATE") ||
-    upper.startsWith("DELETE") ||
-    upper.startsWith("REPLACE") ||
-    upper.startsWith("WITH") ||
-    upper.startsWith("TABLE")
-  );
-}
+export const isExplainableQuery = isExplainable;
 
 /**
  * Splits a SQL text into individual queries and returns only those
  * that are explainable (DML: SELECT, INSERT, UPDATE, DELETE, REPLACE, WITH, TABLE).
- * Each returned entry carries its 1-based index in the original split.
+ *
+ * `index` is 1-based over emitted statements. Comment-only fragments are
+ * folded into adjacent statements (not counted), so indices line up with
+ * the run-button dropdown entries the user sees.
  */
 export function getExplainableQueries(
   sql: string,
 ): { query: string; index: number }[] {
-  return splitQueries(sql).reduce<{ query: string; index: number }[]>(
-    (acc, q, i) => {
-      if (isExplainableQuery(q)) acc.push({ query: q, index: i + 1 });
-      return acc;
-    },
-    [],
+  return splitStatements(sql).flatMap((s, i) =>
+    s.isExplainable ? [{ query: s.text, index: i + 1 }] : [],
   );
 }
 
@@ -110,7 +83,7 @@ export function extractTableName(sql: string): string | null {
   // Match FROM clause with optional quotes
   // Matches: FROM table, FROM `table`, FROM "table", FROM 'table'
   const fromMatch = cleaned.match(/\bFROM\s+([`"']?)(\w+)\1/i);
-  
+
   if (fromMatch && fromMatch[2]) {
     return fromMatch[2];
   }
