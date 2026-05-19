@@ -145,20 +145,26 @@ const DIALECT_TABLE: Readonly<Record<Dialect, DialectOptions>> = {
   generic: GENERIC,
 };
 
-export function dialectOptions(dialect: Dialect): DialectOptions {
-  return DIALECT_TABLE[dialect];
+/**
+ * Look up the option preset for a dialect. Falls back to `generic` if the
+ * caller (e.g. a plugin manifest passing through serde) hands in an
+ * unknown string — the splitter stays defensive even when the type
+ * boundary is bypassed.
+ */
+export function dialectOptions(dialect: Dialect | string): DialectOptions {
+  return DIALECT_TABLE[dialect as Dialect] ?? GENERIC;
 }
 
 export function splitStatements(
   sql: string,
-  dialect: Dialect = 'postgres',
+  dialect: Dialect | string = 'postgres',
 ): Statement[] {
   return splitInto(sql, dialectOptions(dialect));
 }
 
 export function splitQueries(
   sql: string,
-  dialect: Dialect = 'postgres',
+  dialect: Dialect | string = 'postgres',
 ): string[] {
   return splitStatements(sql, dialect).map((s) => s.text);
 }

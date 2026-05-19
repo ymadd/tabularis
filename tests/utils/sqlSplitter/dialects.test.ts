@@ -32,4 +32,14 @@ describe('dialect canaries', () => {
       'SELECT 2',
     ]);
   });
+
+  it('falls back to generic when given an unknown dialect string', () => {
+    // Plugin manifests pass through serde without TS-side validation, so
+    // an unknown value may arrive at runtime. The splitter must not crash.
+    const result = splitQueries(
+      'SELECT 1; SELECT 2',
+      'unknown-driver-from-plugin',
+    );
+    expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+  });
 });

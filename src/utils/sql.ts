@@ -1,7 +1,21 @@
 import { splitStatements, stripLeadingComments, isExplainable } from './sqlSplitter';
 
-export function splitQueries(sql: string): string[] {
-  return splitStatements(sql).map((s) => s.text);
+/**
+ * Dialect identifier accepted by the splitter. Sourced from
+ * `DriverCapabilities.sql_dialect` (Rust side); `undefined` means "use
+ * the splitter default" (postgres), which matches behavior shipped
+ * before the dialect was threaded through.
+ */
+export type SqlDialect =
+  | 'postgres'
+  | 'mysql'
+  | 'mssql'
+  | 'sqlite'
+  | 'oracle'
+  | 'generic';
+
+export function splitQueries(sql: string, dialect?: SqlDialect): string[] {
+  return splitStatements(sql, dialect).map((s) => s.text);
 }
 
 /**
@@ -29,8 +43,9 @@ export const isExplainableQuery = isExplainable;
  */
 export function getExplainableQueries(
   sql: string,
+  dialect?: SqlDialect,
 ): { query: string; index: number }[] {
-  return splitStatements(sql).flatMap((s, i) =>
+  return splitStatements(sql, dialect).flatMap((s, i) =>
     s.isExplainable ? [{ query: s.text, index: i + 1 }] : [],
   );
 }
