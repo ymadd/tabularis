@@ -22,11 +22,16 @@ interface Span {
   readonly end: number;
 }
 
+interface FoldedGroup {
+  readonly spans: ReadonlyArray<Span>;
+  readonly meaningful: Span;
+}
+
 export function splitInto(sql: string, options: DialectOptions): Statement[] {
   if (sql.length === 0) return [];
   const segments = collectSegments(sql, options);
   const folded = foldComments(segments);
-  return folded.map((spans) => buildStatement(sql, spans));
+  return folded.map((group) => buildStatement(sql, group));
 }
 
 function collectSegments(sql: string, options: DialectOptions): RawSegment[] {
@@ -87,14 +92,14 @@ function collectSegments(sql: string, options: DialectOptions): RawSegment[] {
   return segments;
 }
 
-function foldComments(segments: ReadonlyArray<RawSegment>): Span[][] {
-  const output: Span[][] = [];
+function foldComments(segments: ReadonlyArray<RawSegment>): FoldedGroup[] {
+  const output: { spans: Span[]; meaningful: Span }[] = [];
   let pending: Span[] = [];
 
   for (const seg of segments) {
     const span: Span = { start: seg.start, end: seg.end };
     if (seg.hasMeaningful) {
-      output.push([...pending, span]);
+      output.push({ spans: [...pending, span], meaningful: span });
       pending = [];
     } else {
       pending = [...pending, span];
@@ -103,19 +108,24 @@ function foldComments(segments: ReadonlyArray<RawSegment>): Span[][] {
 
   if (pending.length > 0 && output.length > 0) {
     const lastIndex = output.length - 1;
-    output[lastIndex] = [...output[lastIndex], ...pending];
+    const last = output[lastIndex];
+    output[lastIndex] = {
+      spans: [...last.spans, ...pending],
+      meaningful: last.meaningful,
+    };
   }
 
   return output;
 }
 
-function buildStatement(sql: string, spans: Span[]): Statement {
-  const text = spans.map((s) => sql.slice(s.start, s.end)).join('').trim();
-  const start = spans[0].start;
-  const end = spans[spans.length - 1].end;
+function buildStatement(sql: string, group: FoldedGroup): Statement {
+  const text = group.spans
+    .map((s) => sql.slice(s.start, s.end))
+    .join('')
+    .trim();
   return {
     text,
-    range: { start, end },
+    range: { start: group.meaningful.start, end: group.meaningful.end },
     isSelect: isSelect(text),
     returnsResultSet: returnsResultSet(text),
     isExplainable: isExplainable(text),

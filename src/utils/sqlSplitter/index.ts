@@ -12,6 +12,13 @@ export type Dialect =
   | 'oracle'
   | 'generic';
 
+/**
+ * Byte-offset span of the meaningful (non-comment) portion of a statement
+ * in the original source. Comments folded into `Statement.text` are NOT
+ * included in the range — only the actual SQL body. Use this for Monaco
+ * decorations / cursor positioning that should target the real statement
+ * and skip over surrounding comment whitespace.
+ */
 export interface StatementRange {
   readonly start: number;
   readonly end: number;
@@ -91,7 +98,8 @@ const MYSQL: DialectOptions = {
 const MSSQL: DialectOptions = {
   quotes: [
     { open: "'", close: "'", doubleClose: true },
-    { open: '[', close: ']', doubleClose: false },
+    // T-SQL: `]]` inside `[...]` is the literal `]` escape.
+    { open: '[', close: ']', doubleClose: true },
   ],
   eString: false,
   dollarQuoting: false,
@@ -146,25 +154,37 @@ const DIALECT_TABLE: Readonly<Record<Dialect, DialectOptions>> = {
 };
 
 /**
- * Look up the option preset for a dialect. Falls back to `generic` if the
- * caller (e.g. a plugin manifest passing through serde) hands in an
- * unknown string — the splitter stays defensive even when the type
- * boundary is bypassed.
+ * Look up the option preset for a dialect. Strictly typed — pass a
+ * `Dialect`. If you have an unvalidated string (e.g. a plugin manifest
+ * value passed through serde), normalize it at the call site or rely on
+ * the public `splitStatements` / `splitQueries` entry points which do
+ * that normalization for you.
  */
-export function dialectOptions(dialect: Dialect | string): DialectOptions {
-  return DIALECT_TABLE[dialect as Dialect] ?? GENERIC;
+export function dialectOptions(dialect: Dialect): DialectOptions {
+  return DIALECT_TABLE[dialect];
 }
 
+function normalizeDialect(dialect: Dialect | string | undefined): Dialect {
+  if (dialect === undefined) return 'postgres';
+  return dialect in DIALECT_TABLE ? (dialect as Dialect) : 'generic';
+}
+
+/**
+ * Split a SQL source into per-statement metadata. `dialect` is accepted
+ * as `Dialect | string` so plugin-manifest values can flow in without
+ * additional validation at the call site; unknown values fall back to
+ * the `generic` preset rather than throwing.
+ */
 export function splitStatements(
   sql: string,
-  dialect: Dialect | string = 'postgres',
+  dialect?: Dialect | string,
 ): Statement[] {
-  return splitInto(sql, dialectOptions(dialect));
+  return splitInto(sql, dialectOptions(normalizeDialect(dialect)));
 }
 
 export function splitQueries(
   sql: string,
-  dialect: Dialect | string = 'postgres',
+  dialect?: Dialect | string,
 ): string[] {
   return splitStatements(sql, dialect).map((s) => s.text);
 }
