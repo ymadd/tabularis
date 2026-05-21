@@ -6,7 +6,11 @@
 //      (b) trailing comment-only segment(s) → appended to PREVIOUS;
 //      (c) entirely comment-only input → drop, return [].
 
-import { isExplainable, isSelect, returnsResultSet } from './classify';
+import {
+  EXPLAINABLE_KEYWORDS,
+  RESULT_SET_KEYWORDS,
+  leadingKeyword,
+} from './classify';
 import type { DialectOptions, Statement } from './index';
 import type { TokenizerState } from './tokenizer';
 import { scanToken } from './tokenizer';
@@ -123,11 +127,23 @@ function buildStatement(sql: string, group: FoldedGroup): Statement {
     .map((s) => sql.slice(s.start, s.end))
     .join('')
     .trim();
+  const keyword = leadingKeyword(text);
+  const [start, end] = trimRange(sql, group.meaningful.start, group.meaningful.end);
   return {
     text,
-    range: { start: group.meaningful.start, end: group.meaningful.end },
-    isSelect: isSelect(text),
-    returnsResultSet: returnsResultSet(text),
-    isExplainable: isExplainable(text),
+    range: { start, end },
+    isSelect: keyword === 'SELECT',
+    returnsResultSet: RESULT_SET_KEYWORDS.has(keyword),
+    isExplainable: EXPLAINABLE_KEYWORDS.has(keyword),
   };
+}
+
+function trimRange(sql: string, start: number, end: number): [number, number] {
+  while (start < end && isAsciiSpace(sql.charCodeAt(start))) start++;
+  while (end > start && isAsciiSpace(sql.charCodeAt(end - 1))) end--;
+  return [start, end];
+}
+
+function isAsciiSpace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 13;
 }

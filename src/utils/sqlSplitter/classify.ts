@@ -11,7 +11,7 @@
 // there. Keep these two implementations in sync semantically (same
 // keyword sets) but accept the matching strategy difference.
 
-const RESULT_SET_KEYWORDS: ReadonlySet<string> = new Set([
+export const RESULT_SET_KEYWORDS: ReadonlySet<string> = new Set([
   'SELECT',
   'WITH',
   'SHOW',
@@ -24,7 +24,7 @@ const RESULT_SET_KEYWORDS: ReadonlySet<string> = new Set([
   'CALL',
 ]);
 
-const EXPLAINABLE_KEYWORDS: ReadonlySet<string> = new Set([
+export const EXPLAINABLE_KEYWORDS: ReadonlySet<string> = new Set([
   'SELECT',
   'INSERT',
   'UPDATE',
@@ -32,6 +32,8 @@ const EXPLAINABLE_KEYWORDS: ReadonlySet<string> = new Set([
   'REPLACE',
   'WITH',
   'TABLE',
+  // PostgreSQL 15+ and Oracle both support EXPLAIN MERGE.
+  'MERGE',
 ]);
 
 export function stripLeadingComments(query: string): string {
@@ -52,10 +54,14 @@ export function stripLeadingComments(query: string): string {
 }
 
 const LEADING_KEYWORD_RE = /^([A-Za-z_][A-Za-z0-9_]*)/;
+const LEADING_PARENS_RE = /^[(\s]+/;
 
-function leadingKeyword(query: string): string {
-  const stripped = stripLeadingComments(query);
-  const match = LEADING_KEYWORD_RE.exec(stripped);
+export function leadingKeyword(query: string): string {
+  // Strip leading comments, then leading whitespace and `(` so that
+  // parenthesised queries like `(SELECT 1)` still classify by their
+  // inner keyword.
+  const body = stripLeadingComments(query).replace(LEADING_PARENS_RE, '');
+  const match = LEADING_KEYWORD_RE.exec(body);
   return match ? match[1].toUpperCase() : '';
 }
 
