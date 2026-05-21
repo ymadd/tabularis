@@ -64,7 +64,7 @@ import {
   ExportProgressModal,
   type ExportStatus,
 } from "../components/modals/ExportProgressModal";
-import { splitQueries, extractTableName, getExplainableQueries, stripLeadingSqlComments } from "../utils/sql";
+import { splitQueries, extractTableName, getExplainableQueries, statementLabel } from "../utils/sql";
 import {
   createResultEntries,
   updateResultEntry,
@@ -1061,7 +1061,7 @@ export const Editor = () => {
       if (selectedQueries.length > 1) {
         runMultipleQueries(selectedQueries);
       } else {
-        runQuery(selectedText, 1);
+        runQuery(selectedQueries[0] || selectedText, 1);
       }
       return;
     }
@@ -2098,7 +2098,8 @@ export const Editor = () => {
         } else if (explainable.length === 1) {
           openExplainForQueryRef.current(explainable[0].query);
         } else {
-          openExplainForQueryRef.current(explainable[0].query);
+          setExplainSelectableQueries(explainable);
+          setIsExplainSelectionOpen(true);
         }
       },
     });
@@ -2529,7 +2530,7 @@ export const Editor = () => {
                         </div>
                       ) : (
                         dropdownQueries.map((q, i) => {
-                          const label = stripLeadingSqlComments(q) || q;
+                          const label = statementLabel(q);
                           return (
                           <div
                             key={i}
