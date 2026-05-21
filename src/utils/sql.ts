@@ -37,9 +37,13 @@ export const isExplainableQuery = isExplainable;
  * Splits a SQL text into individual queries and returns only those
  * that are explainable (DML: SELECT, INSERT, UPDATE, DELETE, REPLACE, WITH, TABLE).
  *
- * `index` is 1-based over emitted statements. Comment-only fragments are
- * folded into adjacent statements (not counted), so indices line up with
- * the run-button dropdown entries the user sees.
+ * `index` is 1-based and counts *all* statements emitted by the splitter,
+ * including non-explainable ones (DDL etc.). Example: for
+ * `CREATE TABLE t (...); SELECT * FROM t;` the SELECT gets `index: 2`,
+ * matching its position in the run-button dropdown.
+ *
+ * Comment-only fragments are folded into adjacent statements by the
+ * splitter and do not consume an index slot.
  */
 export function getExplainableQueries(
   sql: string,

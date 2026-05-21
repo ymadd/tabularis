@@ -1,6 +1,15 @@
 // Single-statement classifiers. Mirror of
-// src-tauri/src/drivers/common/query.rs:7-84 but word-boundary aware so
-// `SELECTIVE` does not match `SELECT`.
+// src-tauri/src/drivers/common/query.rs:7-84.
+//
+// Deliberate divergence from the Rust side: Rust uses `starts_with` after
+// stripping leading comments, which means inputs like `SELECTIVE ...`
+// would match `SELECT`. The TS side instead extracts the leading
+// identifier and compares whole-word against a keyword set, so
+// `SELECTIVE` does not classify as a SELECT. The split-button dropdown
+// is user-facing, where the stricter rule avoids surprising false
+// positives; the Rust side is internal and the looser rule is fine
+// there. Keep these two implementations in sync semantically (same
+// keyword sets) but accept the matching strategy difference.
 
 const RESULT_SET_KEYWORDS: ReadonlySet<string> = new Set([
   'SELECT',
