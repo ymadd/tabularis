@@ -1075,7 +1075,7 @@ export const Editor = () => {
       setSelectableQueries(queries);
       setIsQuerySelectionModalOpen(true);
     }
-  }, [activeTab, runQuery, runMultipleQueries]);
+  }, [activeTab, activeDialect, runQuery, runMultipleQueries]);
 
   const openExplainForQuery = useCallback((query: string) => {
     setVisualExplainQuery(query);
@@ -1110,7 +1110,7 @@ export const Editor = () => {
       setExplainSelectableQueries(explainable);
       setIsExplainSelectionOpen(true);
     }
-  }, [activeTab, activeConnectionId, openExplainForQuery]);
+  }, [activeTab, activeConnectionId, activeDialect, openExplainForQuery]);
 
   // Keep stable refs in sync for Monaco actions (closure-captured at mount time)
   runQueryRef.current = runQuery;
