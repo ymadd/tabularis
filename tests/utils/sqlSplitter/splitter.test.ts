@@ -158,6 +158,69 @@ describe('splitStatements', () => {
       expect(b.range.start).toBe(9); // ` SELECT 2`
       expect(b.range.end).toBe(sql.length);
     });
+
+    it('excludes a folded trailing comment from range while keeping it in text', () => {
+      // Range should point at the SQL body only — `sql.slice(range)` must
+      // remain valid SQL. Display text still includes the folded comment
+      // so the run-button dropdown shows the user-visible label.
+      const sql = 'SELECT 1; -- trail';
+      const [stmt] = splitStatements(sql);
+      expect(stmt.range.start).toBe(0);
+      expect(stmt.range.end).toBe(8);
+      expect(sql.slice(stmt.range.start, stmt.range.end)).toBe('SELECT 1');
+      expect(stmt.text).toContain('-- trail');
+    });
+
+    it('range points at the meaningful body when a comment-only segment is folded into NEXT', () => {
+      const sql = 'SELECT 1; /* mid */ ; SELECT 2;';
+      const [, b] = splitStatements(sql);
+      // Meaningful for the second emitted statement is ` SELECT 2` after
+      // the second `;`. Range excludes the `/* mid */ ;` chunk that gets
+      // prepended to text.
+      expect(sql.slice(b.range.start, b.range.end).trim()).toBe('SELECT 2');
+      expect(b.text).toContain('/* mid */');
+      expect(b.text).toContain('SELECT 2');
+    });
+  });
+
+  describe('CRLF input', () => {
+    it('splits on `;` even when line endings are CRLF', () => {
+      const result = splitQueries('SELECT 1;\r\nSELECT 2;\r\n');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+    });
+
+    it('treats a CRLF GO line as a separator under mssql', () => {
+      const result = splitQueries('SELECT 1\r\nGO\r\nSELECT 2', 'mssql');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+    });
+  });
+
+  describe('escape-shield end-to-end', () => {
+    it('postgres E-string with an escaped semicolon does not split', () => {
+      const sql = "SELECT E'a\\;b' FROM t; SELECT 2";
+      const result = splitQueries(sql, 'postgres');
+      expect(result).toHaveLength(2);
+      expect(result[0]).toContain("E'a\\;b'");
+      expect(result[1]).toBe('SELECT 2');
+    });
+
+    it('mysql backticked identifier shields a semicolon', () => {
+      const result = splitQueries('SELECT `col;name` FROM t; SELECT 2', 'mysql');
+      expect(result).toHaveLength(2);
+      expect(result[0]).toContain('`col;name`');
+    });
+
+    it('mssql `]]` escape keeps a bracketed identifier intact across `]`', () => {
+      // T-SQL: `[col]]name]` is the identifier literally named `col]name`.
+      // Before doubleClose was wired up on the bracket rule, the first
+      // `]` closed the quote and the trailing `;` after `name]` mid-token
+      // would split incorrectly.
+      const sql = 'SELECT [col]]name] FROM t; SELECT 2';
+      const result = splitQueries(sql, 'mssql');
+      expect(result).toHaveLength(2);
+      expect(result[0]).toContain('[col]]name]');
+      expect(result[1]).toBe('SELECT 2');
+    });
   });
 
   describe('unterminated lenience', () => {
