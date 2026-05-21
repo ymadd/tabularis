@@ -39,14 +39,17 @@ export function scanToken(
   }
 
   if (options.blockComments && ch === '/' && source[position + 1] === '*') {
-    let end = position + 2;
-    while (end + 1 < source.length) {
-      if (source[end] === '*' && source[end + 1] === '/') {
-        return { kind: 'blockComment', length: end + 2 - position };
-      }
-      end++;
-    }
-    return { kind: 'blockComment', length: source.length - position };
+    const length = scanBlockCommentLength(
+      source,
+      position,
+      options.nestedBlockComments,
+    );
+    // MySQL/MariaDB conditional comment `/*! ... */` is executable SQL,
+    // not a noop comment. Emit as `data` so it is treated as meaningful
+    // by the splitter and gets its own statement boundary.
+    const isExecutable =
+      options.executableComments && source[position + 2] === '!';
+    return { kind: isExecutable ? 'data' : 'blockComment', length };
   }
 
   if (
@@ -89,6 +92,30 @@ export function scanToken(
 function isIdentBoundary(source: string, prevIndex: number): boolean {
   if (prevIndex < 0) return false;
   return IDENT_CHAR_RE.test(source[prevIndex]);
+}
+
+function scanBlockCommentLength(
+  source: string,
+  position: number,
+  nested: boolean,
+): number {
+  let depth = 1;
+  let p = position + 2;
+  while (p + 1 < source.length) {
+    if (nested && source[p] === '/' && source[p + 1] === '*') {
+      depth++;
+      p += 2;
+      continue;
+    }
+    if (source[p] === '*' && source[p + 1] === '/') {
+      depth--;
+      p += 2;
+      if (depth === 0) return p - position;
+      continue;
+    }
+    p++;
+  }
+  return source.length - position;
 }
 
 function scanQuoted(
@@ -141,11 +168,11 @@ function scanEString(source: string, position: number): Token {
   return { kind: 'string', length: source.length - position };
 }
 
-const DOLLAR_TAG_RE = /^\$([A-Za-z0-9_]*)\$/;
+const DOLLAR_TAG_RE = /\$([A-Za-z0-9_]*)\$/y;
 
 function scanDollarQuoted(source: string, position: number): Token | null {
-  const slice = source.slice(position);
-  const match = DOLLAR_TAG_RE.exec(slice);
+  DOLLAR_TAG_RE.lastIndex = position;
+  const match = DOLLAR_TAG_RE.exec(source);
   if (!match) return null;
   const tag = match[0];
   let p = position + tag.length;
@@ -173,22 +200,23 @@ function matchesKeyword(
   return true;
 }
 
-const CUSTOM_DELIM_RE = /^DELIMITER[ \t]+([^\n\r]+)/i;
+// DELIMITER directive: take only the first whitespace-terminated token
+// so a trailing `-- comment` on the same line does not bleed into the
+// new delimiter string.
+const CUSTOM_DELIM_RE = /DELIMITER[ \t]+(\S+)/iy;
 
 function readCustomDelimiter(source: string, position: number): Token | null {
-  const slice = source.slice(position);
-  const m = CUSTOM_DELIM_RE.exec(slice);
+  CUSTOM_DELIM_RE.lastIndex = position;
+  const m = CUSTOM_DELIM_RE.exec(source);
   if (!m) return null;
-  const value = m[1].trim();
-  if (value.length === 0) return null;
-  return { kind: 'setDelimiter', length: m[0].length, value };
+  return { kind: 'setDelimiter', length: m[0].length, value: m[1] };
 }
 
-const GO_RE = /^GO[ \t\r]*(\n|$)/i;
+const GO_RE = /GO[ \t\r]*(\n|$)/iy;
 
 function readGoDelimiter(source: string, position: number): Token | null {
-  const slice = source.slice(position);
-  const m = GO_RE.exec(slice);
+  GO_RE.lastIndex = position;
+  const m = GO_RE.exec(source);
   if (!m) return null;
   const length = m[0].endsWith('\n') ? m[0].length - 1 : m[0].length;
   return { kind: 'goDelimiter', length };

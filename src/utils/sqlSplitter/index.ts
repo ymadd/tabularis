@@ -1,7 +1,3 @@
-// First-party SQL statement splitter. Replaces dbgate-query-splitter.
-// Closes #223: comment-only fragments are folded into adjacent statements,
-// never emitted as standalone entries.
-
 import { splitInto } from './splitter';
 
 export type Dialect =
@@ -13,11 +9,15 @@ export type Dialect =
   | 'generic';
 
 /**
- * Byte-offset span of the meaningful (non-comment) portion of a statement
- * in the original source. Comments folded into `Statement.text` are NOT
- * included in the range — only the actual SQL body. Use this for Monaco
- * decorations / cursor positioning that should target the real statement
- * and skip over surrounding comment whitespace.
+ * String-index span (JavaScript UTF-16 code unit offsets) of the
+ * meaningful (non-comment) portion of a statement in the original
+ * source. Comments folded into `Statement.text` are NOT included in
+ * the range — only the actual SQL body. Use this for Monaco
+ * decorations / cursor positioning that should target the real
+ * statement and skip over surrounding comment whitespace.
+ *
+ * Note: these are JS string indices, not byte offsets. Callers that
+ * need byte positions (e.g. a Rust backend) must re-encode.
  */
 export interface StatementRange {
   readonly start: number;
@@ -64,6 +64,18 @@ export interface DialectOptions {
   readonly goDelimiter: boolean;
   readonly lineComments: boolean;
   readonly blockComments: boolean;
+  /**
+   * Treat `/*! … *​/` as a meaningful statement instead of a comment.
+   * MySQL/MariaDB evaluates these "executable comments" when the
+   * embedded version directive permits; dump scripts rely on them
+   * being emitted as their own statement.
+   */
+  readonly executableComments: boolean;
+  /**
+   * Allow `/* … *​/` to nest. Required for PostgreSQL, which permits
+   * `/* outer /* inner *​/ outer *​/` as one comment.
+   */
+  readonly nestedBlockComments: boolean;
 }
 
 const STANDARD_QUOTES: ReadonlyArray<QuoteRule> = [
@@ -79,6 +91,8 @@ const POSTGRES: DialectOptions = {
   goDelimiter: false,
   lineComments: true,
   blockComments: true,
+  executableComments: false,
+  nestedBlockComments: true,
 };
 
 const MYSQL: DialectOptions = {
@@ -93,6 +107,8 @@ const MYSQL: DialectOptions = {
   goDelimiter: false,
   lineComments: true,
   blockComments: true,
+  executableComments: true,
+  nestedBlockComments: false,
 };
 
 const MSSQL: DialectOptions = {
@@ -107,6 +123,8 @@ const MSSQL: DialectOptions = {
   goDelimiter: true,
   lineComments: true,
   blockComments: true,
+  executableComments: false,
+  nestedBlockComments: false,
 };
 
 const SQLITE: DialectOptions = {
@@ -122,8 +140,17 @@ const SQLITE: DialectOptions = {
   goDelimiter: false,
   lineComments: true,
   blockComments: true,
+  executableComments: false,
+  nestedBlockComments: false,
 };
 
+// Oracle's option shape currently matches GENERIC. They are kept as
+// separate constants on purpose: once an Oracle-only feature lands
+// (e.g. `/` block terminator, nested block comments via SQLPlus, the
+// `Q'…'` quoted literal syntax), the divergence stays a one-line edit
+// rather than a search across call sites. If you find yourself
+// modifying both, prefer adding the flag to GENERIC only when it is
+// truly dialect-agnostic.
 const ORACLE: DialectOptions = {
   quotes: STANDARD_QUOTES,
   eString: false,
@@ -132,6 +159,8 @@ const ORACLE: DialectOptions = {
   goDelimiter: false,
   lineComments: true,
   blockComments: true,
+  executableComments: false,
+  nestedBlockComments: false,
 };
 
 const GENERIC: DialectOptions = {
@@ -142,6 +171,8 @@ const GENERIC: DialectOptions = {
   goDelimiter: false,
   lineComments: true,
   blockComments: true,
+  executableComments: false,
+  nestedBlockComments: false,
 };
 
 const DIALECT_TABLE: Readonly<Record<Dialect, DialectOptions>> = {
