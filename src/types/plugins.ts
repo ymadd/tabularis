@@ -1,3 +1,5 @@
+import type { Dialect } from "../utils/sqlSplitter";
+
 export interface DriverCapabilities {
   schemas: boolean;
   views: boolean;
@@ -34,7 +36,7 @@ export interface DriverCapabilities {
    * omit the field fall back to "postgres" (the dialect everyone got
    * implicitly via the previous splitter).
    */
-  sql_dialect?: "postgres" | "mysql" | "mssql" | "sqlite" | "oracle" | "generic";
+  sql_dialect?: Dialect;
 }
 
 export type PluginSettingType = "string" | "boolean" | "number" | "select";

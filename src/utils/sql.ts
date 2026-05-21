@@ -1,36 +1,16 @@
-import { splitStatements, stripLeadingComments, isExplainable } from './sqlSplitter';
+import {
+  type Dialect,
+  splitStatements,
+  stripLeadingComments,
+  isExplainable,
+} from './sqlSplitter';
 
-/**
- * Dialect identifier accepted by the splitter. Sourced from
- * `DriverCapabilities.sql_dialect` (Rust side); `undefined` means "use
- * the splitter default" (postgres), which matches behavior shipped
- * before the dialect was threaded through.
- */
-export type SqlDialect =
-  | 'postgres'
-  | 'mysql'
-  | 'mssql'
-  | 'sqlite'
-  | 'oracle'
-  | 'generic';
+export type SqlDialect = Dialect;
 
-export function splitQueries(sql: string, dialect?: SqlDialect): string[] {
-  return splitStatements(sql, dialect).map((s) => s.text);
-}
+export { splitQueries } from './sqlSplitter';
 
-/**
- * Strip leading SQL comments (single-line and block comments) and whitespace
- * so that the first keyword of the actual statement is at position 0.
- */
 export const stripLeadingSqlComments = stripLeadingComments;
 
-/**
- * Check if a SQL statement supports EXPLAIN.
- *
- * EXPLAIN works with DML statements (SELECT, INSERT, UPDATE, DELETE, REPLACE)
- * and CTEs (WITH). DDL statements (CREATE, DROP, ALTER, TRUNCATE, etc.) are not supported.
- * Leading SQL comments are stripped before checking.
- */
 export const isExplainableQuery = isExplainable;
 
 /**
@@ -52,6 +32,16 @@ export function getExplainableQueries(
   return splitStatements(sql, dialect).flatMap((s, i) =>
     s.isExplainable ? [{ query: s.text, index: i + 1 }] : [],
   );
+}
+
+/**
+ * Returns the user-facing label for a SQL statement in dropdowns and
+ * pickers. Strips leading comments so the first keyword surfaces, and
+ * falls back to the raw text when the statement is entirely comments
+ * (so the label is never blank).
+ */
+export function statementLabel(query: string): string {
+  return stripLeadingComments(query) || query;
 }
 
 /**
