@@ -1,5 +1,6 @@
 use super::build_mysql_pk_where;
 use super::explain::{parse_analyze_actual, parse_mysql_analyze_text, parse_mysql_query_block};
+use super::helpers::parse_mysql_enum_values;
 use super::MysqlDriver;
 use crate::drivers::driver_trait::DatabaseDriver;
 use crate::models::ExplainNode;
@@ -632,4 +633,66 @@ mod build_mysql_pk_where_tests {
         let pk_map: HashMap<String, serde_json::Value> = HashMap::new();
         assert!(build_mysql_pk_where(&pk_map).is_err());
     }
+}
+
+// -- parse_mysql_enum_values ------------------------------------------------
+
+#[test]
+fn parse_enum_basic() {
+    assert_eq!(
+        parse_mysql_enum_values("enum('active','inactive','pending')"),
+        Some(vec![
+            "active".to_string(),
+            "inactive".to_string(),
+            "pending".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn parse_enum_uppercase_keyword() {
+    assert_eq!(
+        parse_mysql_enum_values("ENUM('a','b')"),
+        Some(vec!["a".to_string(), "b".to_string()])
+    );
+}
+
+#[test]
+fn parse_enum_set_type() {
+    assert_eq!(
+        parse_mysql_enum_values("set('r','w','x')"),
+        Some(vec!["r".to_string(), "w".to_string(), "x".to_string()])
+    );
+}
+
+#[test]
+fn parse_enum_doubled_single_quote() {
+    assert_eq!(
+        parse_mysql_enum_values("enum('it''s','done')"),
+        Some(vec!["it's".to_string(), "done".to_string()])
+    );
+}
+
+#[test]
+fn parse_enum_returns_none_for_non_enum() {
+    assert_eq!(parse_mysql_enum_values("varchar(255)"), None);
+    assert_eq!(parse_mysql_enum_values("int(11)"), None);
+}
+
+#[test]
+fn parse_enum_returns_none_for_unterminated_literal() {
+    assert_eq!(parse_mysql_enum_values("enum('open"), None);
+}
+
+#[test]
+fn parse_enum_returns_none_for_empty_enum() {
+    assert_eq!(parse_mysql_enum_values("enum()"), None);
+}
+
+#[test]
+fn parse_enum_preserves_value_casing() {
+    assert_eq!(
+        parse_mysql_enum_values("enum('Active','Inactive')"),
+        Some(vec!["Active".to_string(), "Inactive".to_string()])
+    );
 }

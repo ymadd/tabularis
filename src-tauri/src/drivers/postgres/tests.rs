@@ -330,6 +330,7 @@ mod bind_pg_value_tests {
                 column_type: Some("boolean"),
                 max_blob_size: 1024,
                 allow_default: true,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -347,6 +348,7 @@ mod bind_pg_value_tests {
                 column_type: Some("boolean"),
                 max_blob_size: 1024,
                 allow_default: true,
+                user_defined_type: None,
             },
         ) {
             Ok(_) => panic!("expected invalid boolean binding to fail"),
@@ -364,6 +366,7 @@ mod bind_pg_value_tests {
                 column_type: Some("integer"),
                 max_blob_size: 1024,
                 allow_default: true,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -381,6 +384,7 @@ mod bind_pg_value_tests {
                 column_type: None,
                 max_blob_size: 1024,
                 allow_default: true,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -398,6 +402,7 @@ mod bind_pg_value_tests {
                 column_type: None,
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -415,6 +420,7 @@ mod bind_pg_value_tests {
                 column_type: None,
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -432,6 +438,7 @@ mod bind_pg_value_tests {
                 column_type: Some("jsonb"),
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -449,6 +456,7 @@ mod bind_pg_value_tests {
                 column_type: Some("json"),
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -466,6 +474,7 @@ mod bind_pg_value_tests {
                 column_type: Some("jsonb"),
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         )
         .unwrap();
@@ -483,12 +492,69 @@ mod bind_pg_value_tests {
                 column_type: Some("text"),
                 max_blob_size: 1024,
                 allow_default: false,
+                user_defined_type: None,
             },
         ) {
             Ok(_) => panic!("expected error binding JSON object to non-JSON column"),
             Err(err) => err,
         };
         assert!(err.contains("JSON object"));
+    }
+
+    #[test]
+    fn enum_column_casts_string_to_qualified_type() {
+        let bound = bind_pg_value(
+            serde_json::json!("active"),
+            1,
+            PgValueOptions {
+                column_type: Some("USER-DEFINED"),
+                user_defined_type: Some("\"public\".\"status\""),
+                max_blob_size: 1024,
+                allow_default: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bound.sql, "CAST($1 AS \"public\".\"status\")");
+        assert!(bound.param.is_some());
+    }
+
+    #[test]
+    fn enum_cast_takes_precedence_over_uuid_shaped_value() {
+        // A value that happens to parse as a UUID must still bind as the enum
+        // type when the column metadata says so, not as CAST(... AS uuid).
+        let bound = bind_pg_value(
+            serde_json::json!("550e8400-e29b-41d4-a716-446655440000"),
+            3,
+            PgValueOptions {
+                column_type: Some("USER-DEFINED"),
+                user_defined_type: Some("\"public\".\"token_kind\""),
+                max_blob_size: 1024,
+                allow_default: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bound.sql, "CAST($3 AS \"public\".\"token_kind\")");
+        assert!(bound.param.is_some());
+    }
+
+    #[test]
+    fn user_defined_type_none_leaves_plain_string_binding() {
+        let bound = bind_pg_value(
+            serde_json::json!("plain"),
+            2,
+            PgValueOptions {
+                column_type: Some("text"),
+                user_defined_type: None,
+                max_blob_size: 1024,
+                allow_default: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bound.sql, "$2");
+        assert!(bound.param.is_some());
     }
 }
 

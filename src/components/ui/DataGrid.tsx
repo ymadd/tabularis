@@ -280,6 +280,18 @@ export const DataGrid = React.memo(
       return map;
     }, [colorByType, columns, columnTypeMap]);
 
+    const columnEnumValuesMap = useMemo(() => {
+      if (!columnMetadata) return null;
+      return new Map(
+        columnMetadata
+          .filter(
+            (col) =>
+              Array.isArray(col.enum_values) && col.enum_values.length > 0,
+          )
+          .map((col) => [col.name, col.enum_values] as const),
+      );
+    }, [columnMetadata]);
+
     const isJsonCellTarget = useCallback(
       (colType: string | undefined, value: unknown): boolean => {
         if (colType && isJsonColumn(colType)) return true;
@@ -1256,6 +1268,7 @@ export const DataGrid = React.memo(
         columnTypeMap,
         columnLengthMap,
         resultColorClassMap,
+        columnEnumValuesMap,
         isJsonCellTarget,
         fksByColumn,
         t,
@@ -1293,6 +1306,7 @@ export const DataGrid = React.memo(
         columnTypeMap,
         columnLengthMap,
         resultColorClassMap,
+        columnEnumValuesMap,
         isJsonCellTarget,
         fksByColumn,
         t,
@@ -1678,11 +1692,14 @@ export const DataGrid = React.memo(
                   detectJsonInTextColumns={detectJsonInTextColumns}
                   rowIndex={sidebarRowData.rowIndex}
                   isInsertion={isInsertion}
-                  columns={columns.map((colName, index) => ({
+                  // All metadata is keyed by column name (like the inline grid
+                  // path) so it survives reordered/subset result columns where
+                  // positional indexing into columnMetadata would misalign.
+                  columns={columns.map((colName) => ({
                     name: colName,
-                    type: columnMetadata?.[index]?.data_type,
-                    characterMaximumLength:
-                      columnMetadata?.[index]?.character_maximum_length,
+                    type: columnTypeMap?.get(colName),
+                    characterMaximumLength: columnLengthMap?.get(colName),
+                    enumValues: columnEnumValuesMap?.get(colName),
                   }))}
                   autoIncrementColumns={autoIncrementColumns}
                   defaultValueColumns={defaultValueColumns}

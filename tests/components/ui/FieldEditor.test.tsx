@@ -310,4 +310,83 @@ describe("FieldEditor", () => {
     const geometryInput = screen.getByTestId("geometry-input");
     expect(geometryInput).toHaveValue("");
   });
+
+  describe("enum selector", () => {
+    it("renders a <select> populated with the enum values", () => {
+      const onChange = vi.fn();
+      render(
+        <FieldEditor
+          name="status"
+          type="varchar"
+          enumValues={["active", "inactive", "pending"]}
+          value="active"
+          onChange={onChange}
+        />
+      );
+
+      const select = screen.getByRole("combobox") as HTMLSelectElement;
+      expect(select.tagName).toBe("SELECT");
+      expect(select.value).toBe("active");
+      expect(
+        Array.from(select.options)
+          .filter((o) => !o.disabled)
+          .map((o) => o.value)
+      ).toEqual(["active", "inactive", "pending"]);
+      // textarea fallback should not be rendered
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
+
+    it("calls onChange with the selected enum value", () => {
+      const onChange = vi.fn();
+      render(
+        <FieldEditor
+          name="status"
+          type="varchar"
+          enumValues={["active", "inactive"]}
+          value="active"
+          onChange={onChange}
+        />
+      );
+
+      fireEvent.change(screen.getByRole("combobox"), {
+        target: { value: "inactive" },
+      });
+
+      expect(onChange).toHaveBeenCalledWith("inactive");
+    });
+
+    it("surfaces a legacy value that is not part of the enum", () => {
+      const onChange = vi.fn();
+      render(
+        <FieldEditor
+          name="status"
+          type="varchar"
+          enumValues={["active", "inactive"]}
+          value="archived"
+          onChange={onChange}
+        />
+      );
+
+      const select = screen.getByRole("combobox") as HTMLSelectElement;
+      expect(select.value).toBe("archived");
+      const values = Array.from(select.options).map((o) => o.value);
+      expect(values).toContain("archived");
+    });
+
+    it("falls back to textarea when enumValues is empty", () => {
+      const onChange = vi.fn();
+      render(
+        <FieldEditor
+          name="status"
+          type="varchar"
+          enumValues={[]}
+          value=""
+          onChange={onChange}
+        />
+      );
+
+      expect(screen.getByRole("textbox").tagName).toBe("TEXTAREA");
+      expect(screen.queryByRole("combobox")).toBeNull();
+    });
+  });
 });

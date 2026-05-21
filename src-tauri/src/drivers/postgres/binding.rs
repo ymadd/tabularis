@@ -15,6 +15,12 @@ pub(super) struct BoundValue {
 
 pub(super) struct PgValueOptions<'a> {
     pub column_type: Option<&'a str>,
+    /// Qualified, double-quoted PostgreSQL type (e.g. `"public"."mood"`) to wrap
+    /// string params in via `CAST($N AS …)` when the column is a user-defined
+    /// type such as an enum. tokio-postgres' `ToSql for str` does not accept
+    /// `Kind::Enum`, so a bare `$N` text param is rejected for enum columns;
+    /// casting lets the server infer `$N` as text and coerce the label.
+    pub user_defined_type: Option<&'a str>,
     pub max_blob_size: u64,
     pub allow_default: bool,
 }
@@ -288,6 +294,18 @@ fn bind_pg_string(
         .and_then(|data_type| bind_pg_numeric_string(s, data_type, placeholder_idx))
     {
         return binding;
+    }
+
+    // User-defined types (enums) reach here as plain strings. tokio-postgres
+    // cannot bind a String to an enum OID, so wrap the text param in an explicit
+    // cast: PostgreSQL then infers `$N` as text and coerces the label to the
+    // enum type. Authoritative column metadata takes precedence over the
+    // value-shape heuristics below (raw SQL / WKT / UUID / array).
+    if let Some(udt) = options.user_defined_type {
+        return Ok(BoundValue {
+            sql: format!("CAST(${} AS {})", placeholder_idx, udt),
+            param: Some(Box::new(s.to_string())),
+        });
     }
 
     if is_raw_sql_function(s) {

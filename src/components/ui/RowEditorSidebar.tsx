@@ -13,7 +13,12 @@ interface RowEditorSidebarProps {
   originalRowData?: Record<string, unknown>;
   rowIndex: number;
   isInsertion: boolean;
-  columns: Array<{ name: string; type?: string; characterMaximumLength?: number }>;
+  columns: Array<{
+    name: string;
+    type?: string;
+    characterMaximumLength?: number;
+    enumValues?: string[];
+  }>;
   autoIncrementColumns?: string[];
   defaultValueColumns?: string[];
   nullableColumns?: string[];
@@ -166,6 +171,7 @@ export const RowEditorSidebar = ({
                   name={column.name}
                   type={column.type}
                   characterMaximumLength={column.characterMaximumLength}
+                  enumValues={column.enumValues}
                   value={value}
                   originalValue={originalRowData?.[column.name]}
                   detectJsonInTextColumns={detectJsonInTextColumns}

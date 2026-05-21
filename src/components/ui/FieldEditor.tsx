@@ -4,6 +4,7 @@ import { Sparkles, Ban, FileDigit } from "lucide-react";
 import { GeometryInput } from "./GeometryInput";
 import { BlobInput } from "./BlobInput";
 import { DateInput } from "./DateInput";
+import { EnumSelect } from "./EnumSelect";
 import { JsonInput } from "./JsonInput";
 import { TextInput } from "./TextInput";
 import { isGeometricType, formatGeometricValue } from "../../utils/geometry";
@@ -17,6 +18,7 @@ export interface FieldEditorProps {
   name: string;
   type?: string;
   characterMaximumLength?: number;
+  enumValues?: string[];
   value: unknown;
   onChange: (value: unknown) => void;
   placeholder?: string;
@@ -41,6 +43,7 @@ export const FieldEditor = ({
   name,
   type,
   characterMaximumLength,
+  enumValues,
   value,
   onChange,
   placeholder,
@@ -57,10 +60,12 @@ export const FieldEditor = ({
   schema,
 }: FieldEditorProps) => {
   const { t } = useTranslation();
-  const isGeometric = type && isGeometricType(type);
-  const isBlob = type && isBlobColumn(type, characterMaximumLength);
-  const isJsonByType = !!(type && isJsonColumn(type));
+  const hasEnum = Array.isArray(enumValues) && enumValues.length > 0;
+  const isGeometric = !hasEnum && type && isGeometricType(type);
+  const isBlob = !hasEnum && type && isBlobColumn(type, characterMaximumLength);
+  const isJsonByType = !hasEnum && !!(type && isJsonColumn(type));
   const detectedJson =
+    !hasEnum &&
     !isBlob &&
     !isGeometric &&
     detectJsonInTextColumns &&
@@ -69,8 +74,9 @@ export const FieldEditor = ({
       isJsonContent(value) ||
       isJsonContent(originalValue));
   const isJson = isJsonByType || detectedJson;
-  const dateMode = !isJson && type ? getDateInputMode(type) : null;
+  const dateMode = !hasEnum && !isJson && type ? getDateInputMode(type) : null;
   const isLongText =
+    !hasEnum &&
     !isBlob &&
     !isGeometric &&
     !isJson &&
@@ -91,7 +97,14 @@ export const FieldEditor = ({
     return String(value ?? "");
   }, [isGeometric, value]);
 
-  const inputElement = isBlob ? (
+  const inputElement = hasEnum ? (
+    <EnumSelect
+      value={value}
+      options={enumValues ?? []}
+      onChange={onChange}
+      className={`px-3 py-2 border border-strong rounded-lg focus:border-blue-500 ${className}`}
+    />
+  ) : isBlob ? (
     <div className={`${className}`}>
       <BlobInput
         value={value}

@@ -1,6 +1,7 @@
 mod blob;
 mod query;
 mod safe_int;
+mod sql_literals;
 
 #[cfg(test)]
 mod tests;
@@ -17,3 +18,4 @@ pub use query::{
 pub use safe_int::{
     i64_to_json, parse_unsafe_bigint_string, u64_to_json, JS_MAX_SAFE_INTEGER, JS_MAX_SAFE_UINT,
 };
+pub use sql_literals::parse_sql_quoted_string_list;

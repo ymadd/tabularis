@@ -293,6 +293,13 @@ pub struct TableColumn {
     pub default_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub character_maximum_length: Option<u64>,
+    /// Allowed values for enum-like columns: MySQL `ENUM`/`SET`, PostgreSQL
+    /// enum types, and SQLite `CHECK(col IN (...))`. Populates the editor's
+    /// dropdown. Note the write path differs by driver: MySQL and SQLite accept
+    /// the selected label as a plain string param, but PostgreSQL enum columns
+    /// must be cast to their UDT at bind time (see postgres `binding.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

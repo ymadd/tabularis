@@ -3,6 +3,7 @@ pub mod extract;
 pub mod types;
 
 mod explain;
+mod parser;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +72,15 @@ pub async fn get_columns(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Fetch the CREATE TABLE DDL so we can mine CHECK(col IN (...)) constraints
+    // for enum-like values. Missing/unparseable DDL falls back to no enum info.
+    let ddl: Option<String> = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = ?")
+        .bind(table_name)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+
     Ok(rows
         .iter()
         .map(|r| {
@@ -78,17 +88,23 @@ pub async fn get_columns(
             let notnull: i32 = r.try_get("notnull").unwrap_or(0);
             let dtype: String = r.try_get("type").unwrap_or_default();
             let dflt_value: Option<String> = r.try_get("dflt_value").ok();
+            let name: String = r.try_get("name").unwrap_or_default();
 
             let _is_auto = pk > 0 && dtype.to_uppercase().contains("INT");
 
+            let enum_values = ddl
+                .as_deref()
+                .and_then(|sql| parser::parse_sqlite_check_in_values(sql, &name));
+
             TableColumn {
-                name: r.try_get("name").unwrap_or_default(),
+                name,
                 data_type: r.try_get("type").unwrap_or_default(),
                 is_pk: pk > 0,
                 is_nullable: notnull == 0,
                 is_auto_increment: false,
                 default_value: dflt_value,
                 character_maximum_length: None,
+                enum_values,
             }
         })
         .collect())
@@ -156,6 +172,21 @@ pub async fn get_all_columns_batch(
     let pool = get_sqlite_pool(params).await?;
     let mut result: HashMap<String, Vec<TableColumn>> = HashMap::new();
 
+    // Fetch CREATE TABLE DDL for every table up front so we can mine CHECK enum
+    // constraints without an extra round-trip per column.
+    let ddl_rows = sqlx::query("SELECT name, sql FROM sqlite_master WHERE type IN ('table','view')")
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let ddl_map: HashMap<String, String> = ddl_rows
+        .iter()
+        .filter_map(|r| {
+            let name: String = r.try_get("name").ok()?;
+            let sql: Option<String> = r.try_get("sql").ok();
+            sql.map(|s| (name, s))
+        })
+        .collect();
+
     for table_name in table_names {
         let query = format!("PRAGMA table_info('{}')", table_name);
         let rows = sqlx::query(&query)
@@ -163,20 +194,26 @@ pub async fn get_all_columns_batch(
             .await
             .map_err(|e| e.to_string())?;
 
+        let table_ddl = ddl_map.get(table_name).map(|s| s.as_str());
+
         let columns: Vec<TableColumn> = rows
             .iter()
             .map(|r| {
                 let pk: i32 = r.try_get("pk").unwrap_or(0);
                 let notnull: i32 = r.try_get("notnull").unwrap_or(0);
                 let dflt_value: Option<String> = r.try_get("dflt_value").ok();
+                let name: String = r.try_get("name").unwrap_or_default();
+                let enum_values = table_ddl
+                    .and_then(|sql| parser::parse_sqlite_check_in_values(sql, &name));
                 TableColumn {
-                    name: r.try_get("name").unwrap_or_default(),
+                    name,
                     data_type: r.try_get("type").unwrap_or_default(),
                     is_pk: pk > 0,
                     is_nullable: notnull == 0,
                     is_auto_increment: false, // SQLite doesn't expose this via table_info easily, typically AUTOINCREMENT on INTEGER PRIMARY KEY
                     default_value: dflt_value,
                     character_maximum_length: None,
+                    enum_values,
                 }
             })
             .collect();
@@ -755,6 +792,7 @@ pub async fn get_view_columns(
                 is_auto_increment: false,
                 default_value: dflt_value,
                 character_maximum_length: None,
+                enum_values: None,
             }
         })
         .collect())

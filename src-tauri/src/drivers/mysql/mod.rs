@@ -18,6 +18,7 @@ pub use explain::explain_query;
 use extract::extract_value;
 use helpers::{
     escape_identifier, is_raw_sql_function, is_wkt_geometry, mysql_row_str, mysql_row_str_opt,
+    parse_mysql_enum_values,
 };
 use sqlx::{Column, Row};
 
@@ -67,7 +68,7 @@ pub async fn get_columns(
     let pool = get_mysql_pool(params).await?;
 
     let query = r#"
-        SELECT column_name, data_type, column_key, is_nullable, extra, column_default, character_maximum_length
+        SELECT column_name, data_type, column_type, column_key, is_nullable, extra, column_default, character_maximum_length
         FROM information_schema.columns
         WHERE table_schema = ? AND table_name = ?
         ORDER BY ordinal_position
@@ -85,11 +86,12 @@ pub async fn get_columns(
         .map(|r| {
             let column_name = mysql_row_str(r, 0);
             let data_type = mysql_row_str(r, 1);
-            let key = mysql_row_str(r, 2);
-            let null_str = mysql_row_str(r, 3);
-            let extra = mysql_row_str(r, 4);
-            let default_val = mysql_row_str_opt(r, 5);
-            let character_maximum_length: Option<u64> = r.try_get(6).ok();
+            let column_type = mysql_row_str(r, 2);
+            let key = mysql_row_str(r, 3);
+            let null_str = mysql_row_str(r, 4);
+            let extra = mysql_row_str(r, 5);
+            let default_val = mysql_row_str_opt(r, 6);
+            let character_maximum_length: Option<u64> = r.try_get(7).ok();
 
             let is_auto_increment = extra.contains("auto_increment");
 
@@ -102,6 +104,8 @@ pub async fn get_columns(
                 None
             };
 
+            let enum_values = parse_mysql_enum_values(&column_type);
+
             TableColumn {
                 name: column_name,
                 data_type,
@@ -110,6 +114,7 @@ pub async fn get_columns(
                 is_auto_increment,
                 default_value,
                 character_maximum_length,
+                enum_values,
             }
         })
         .collect())
@@ -171,7 +176,7 @@ pub async fn get_all_columns_batch(
     let pool = get_mysql_pool(params).await?;
 
     let query = r#"
-        SELECT table_name, column_name, data_type, column_key, is_nullable, extra, column_default, character_maximum_length
+        SELECT table_name, column_name, data_type, column_type, column_key, is_nullable, extra, column_default, character_maximum_length
         FROM information_schema.columns
         WHERE table_schema = ?
         ORDER BY table_name, ordinal_position
@@ -189,11 +194,12 @@ pub async fn get_all_columns_batch(
         let table_name = mysql_row_str(row, 0);
         let column_name = mysql_row_str(row, 1);
         let data_type = mysql_row_str(row, 2);
-        let key = mysql_row_str(row, 3);
-        let null_str = mysql_row_str(row, 4);
-        let extra = mysql_row_str(row, 5);
-        let default_val = mysql_row_str_opt(row, 6);
-        let character_maximum_length: Option<u64> = row.try_get(7).ok();
+        let column_type = mysql_row_str(row, 3);
+        let key = mysql_row_str(row, 4);
+        let null_str = mysql_row_str(row, 5);
+        let extra = mysql_row_str(row, 6);
+        let default_val = mysql_row_str_opt(row, 7);
+        let character_maximum_length: Option<u64> = row.try_get(8).ok();
 
         let is_auto_increment = extra.contains("auto_increment");
 
@@ -206,6 +212,8 @@ pub async fn get_all_columns_batch(
             None
         };
 
+        let enum_values = parse_mysql_enum_values(&column_type);
+
         let column = TableColumn {
             name: column_name,
             data_type,
@@ -214,6 +222,7 @@ pub async fn get_all_columns_batch(
             is_auto_increment,
             default_value,
             character_maximum_length,
+            enum_values,
         };
 
         result
@@ -747,7 +756,7 @@ pub async fn get_view_columns(
     let pool = get_mysql_pool(params).await?;
 
     let query = r#"
-            SELECT column_name, data_type, column_key, is_nullable, extra, column_default, character_maximum_length
+            SELECT column_name, data_type, column_type, column_key, is_nullable, extra, column_default, character_maximum_length
             FROM information_schema.columns
             WHERE table_schema = ? AND table_name = ?
             ORDER BY ordinal_position
@@ -765,11 +774,12 @@ pub async fn get_view_columns(
         .map(|r| {
             let column_name = mysql_row_str(r, 0);
             let data_type = mysql_row_str(r, 1);
-            let key = mysql_row_str(r, 2);
-            let null_str = mysql_row_str(r, 3);
-            let extra = mysql_row_str(r, 4);
-            let default_val = mysql_row_str_opt(r, 5);
-            let character_maximum_length: Option<u64> = r.try_get(6).ok();
+            let column_type = mysql_row_str(r, 2);
+            let key = mysql_row_str(r, 3);
+            let null_str = mysql_row_str(r, 4);
+            let extra = mysql_row_str(r, 5);
+            let default_val = mysql_row_str_opt(r, 6);
+            let character_maximum_length: Option<u64> = r.try_get(7).ok();
 
             let is_auto_increment = extra.contains("auto_increment");
 
@@ -782,6 +792,8 @@ pub async fn get_view_columns(
                 None
             };
 
+            let enum_values = parse_mysql_enum_values(&column_type);
+
             TableColumn {
                 name: column_name,
                 data_type,
@@ -790,6 +802,7 @@ pub async fn get_view_columns(
                 is_auto_increment,
                 default_value,
                 character_maximum_length,
+                enum_values,
             }
         })
         .collect())

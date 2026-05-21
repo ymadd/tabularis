@@ -1,4 +1,5 @@
 use super::explain::{build_sqlite_tree, parse_sqlite_detail};
+use super::parser::parse_sqlite_check_in_values;
 use super::sqlite_push_pk_where;
 use super::{alter_view, create_view, drop_view, get_view_columns, get_view_definition, get_views};
 use crate::models::{ConnectionParams, DatabaseSelection};
@@ -190,4 +191,73 @@ mod sqlite_push_pk_where_tests {
         sqlite_push_pk_where(&mut qb, &pk_map).unwrap();
         assert_eq!(qb.sql(), "\"a\"\"b\" = ?");
     }
+}
+
+// -- parse_sqlite_check_in_values -------------------------------------------
+
+#[test]
+fn parse_check_basic_in_clause() {
+    let ddl = "CREATE TABLE t (status TEXT CHECK(status IN ('active', 'inactive', 'pending')))";
+    assert_eq!(
+        parse_sqlite_check_in_values(ddl, "status"),
+        Some(vec![
+            "active".to_string(),
+            "inactive".to_string(),
+            "pending".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn parse_check_double_quoted_column() {
+    let ddl = r#"CREATE TABLE t ("status" TEXT CHECK("status" IN ('a', 'b')))"#;
+    assert_eq!(
+        parse_sqlite_check_in_values(ddl, "status"),
+        Some(vec!["a".to_string(), "b".to_string()])
+    );
+}
+
+#[test]
+fn parse_check_case_insensitive_in_keyword() {
+    let ddl = "CREATE TABLE t (status TEXT CHECK(status In ('a','b')))";
+    assert_eq!(
+        parse_sqlite_check_in_values(ddl, "status"),
+        Some(vec!["a".to_string(), "b".to_string()])
+    );
+}
+
+#[test]
+fn parse_check_doubled_single_quote() {
+    let ddl = "CREATE TABLE t (status TEXT CHECK(status IN ('it''s')))";
+    assert_eq!(
+        parse_sqlite_check_in_values(ddl, "status"),
+        Some(vec!["it's".to_string()])
+    );
+}
+
+#[test]
+fn parse_check_returns_none_for_no_match() {
+    let ddl = "CREATE TABLE t (status TEXT)";
+    assert_eq!(parse_sqlite_check_in_values(ddl, "status"), None);
+}
+
+#[test]
+fn parse_check_returns_none_for_non_string_list() {
+    let ddl = "CREATE TABLE t (n INTEGER CHECK(n IN (1, 2, 3)))";
+    assert_eq!(parse_sqlite_check_in_values(ddl, "n"), None);
+}
+
+#[test]
+fn parse_check_does_not_match_partial_column_name() {
+    let ddl = "CREATE TABLE t (status_id INTEGER, label TEXT CHECK(label IN ('a')))";
+    assert_eq!(parse_sqlite_check_in_values(ddl, "status"), None);
+}
+
+#[test]
+fn parse_check_handles_paren_inside_string_literal() {
+    let ddl = "CREATE TABLE t (status TEXT CHECK(status IN ('a)', 'b')))";
+    assert_eq!(
+        parse_sqlite_check_in_values(ddl, "status"),
+        Some(vec!["a)".to_string(), "b".to_string()])
+    );
 }

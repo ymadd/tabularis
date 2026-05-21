@@ -19,6 +19,7 @@ import { getDateInputMode } from "../../utils/dateInput";
 import { renderDefaultCellContent } from "../../utils/dataGridCell";
 import { GeometryInput } from "./GeometryInput";
 import { DateInput } from "./DateInput";
+import { EnumSelect } from "./EnumSelect";
 import { JsonCell } from "./JsonCell";
 import { JsonExpansionEditor } from "./JsonExpansionEditor";
 import { TextCell } from "./TextCell";
@@ -48,6 +49,13 @@ export interface RowCtx {
    * render plain text with no extra wrapper, matching the original behavior.
    */
   resultColorClassMap: Map<string, string> | null;
+  /**
+   * Per-column enum/allowed-value lists (MySQL ENUM/SET, PostgreSQL enum,
+   * SQLite CHECK..IN). Present only for columns with a finite value set; those
+   * cells edit through a `<select>` instead of free text. `null` when no
+   * column metadata is available.
+   */
+  columnEnumValuesMap: Map<string, string[] | undefined> | null;
   isJsonCellTarget: (colType: string | undefined, value: unknown) => boolean;
   fksByColumn: Map<string, ForeignKey>;
   t: (key: string, opts?: Record<string, unknown>) => string;
@@ -164,6 +172,7 @@ export const MemoRow = React.memo(function MemoRow(rowCtx: MemoRowProps) {
     columnTypeMap,
     columnLengthMap,
     resultColorClassMap,
+    columnEnumValuesMap,
     isJsonCellTarget,
     fksByColumn,
     t,
@@ -374,6 +383,24 @@ export const MemoRow = React.memo(function MemoRow(rowCtx: MemoRowProps) {
               {isEditing
                 ? (() => {
                     const colType = columnTypeMap?.get(colName);
+                    const enumOptions = columnEnumValuesMap?.get(colName);
+                    if (enumOptions) {
+                      return (
+                        <EnumSelect
+                          value={editingCell.value}
+                          options={enumOptions}
+                          onChange={(newValue) =>
+                            setEditingCell((prev) =>
+                              prev ? { ...prev, value: newValue } : null,
+                            )
+                          }
+                          onBlur={handleEditCommit}
+                          onKeyDown={handleKeyDown}
+                          autoFocus
+                          className="border border-blue-500 rounded shadow-lg p-2 text-sm"
+                        />
+                      );
+                    }
                     if (colType && isGeometricType(colType)) {
                       return (
                         <GeometryInput

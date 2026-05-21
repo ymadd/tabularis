@@ -41,6 +41,28 @@ pub(super) fn is_wkt_geometry(s: &str) -> bool {
         || s_upper.starts_with("GEOMETRY(")
 }
 
+/// Parses a MySQL `COLUMN_TYPE` value such as `enum('a','b','c')` or `set('r','w')`
+/// and returns the contained literal list. Returns `None` for non-enum/set types
+/// or malformed input.
+pub(super) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> {
+    let trimmed = column_type.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let prefix_len = if lower.starts_with("enum(") {
+        5
+    } else if lower.starts_with("set(") {
+        4
+    } else {
+        return None;
+    };
+
+    let after_paren = &trimmed[prefix_len..];
+    if !after_paren.ends_with(')') {
+        return None;
+    }
+    let inner = &after_paren[..after_paren.len() - 1];
+    crate::drivers::common::parse_sql_quoted_string_list(inner)
+}
+
 /// Checks if a string value is a raw SQL function call (e.g., ST_GeomFromText(...))
 /// This is used to detect when user has entered a complete SQL function that should
 /// be inserted directly into the query without parameter binding

@@ -105,7 +105,12 @@ pub async fn get_columns(
              WHERE tc.constraint_type = 'PRIMARY KEY'
              AND tc.table_schema = c.table_schema
              AND kcu.table_name = c.table_name
-             AND kcu.column_name = c.column_name) > 0 as is_pk
+             AND kcu.column_name = c.column_name) > 0 as is_pk,
+            (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder)
+             FROM pg_enum e
+             JOIN pg_type t ON e.enumtypid = t.oid
+             JOIN pg_namespace n ON t.typnamespace = n.oid
+             WHERE t.typname = c.udt_name AND n.nspname = c.udt_schema) AS enum_values
         FROM information_schema.columns c
         WHERE c.table_schema = $1 AND c.table_name = $2
         ORDER BY c.ordinal_position
@@ -125,6 +130,10 @@ pub async fn get_columns(
                 .ok()
                 .flatten()
                 .and_then(|v| u64::try_from(v).ok());
+            let enum_values: Option<Vec<String>> = r
+                .try_get::<_, Option<Vec<String>>>("enum_values")
+                .ok()
+                .flatten();
 
             let is_auto = is_identity == "YES" || default_val.contains("nextval");
 
@@ -148,6 +157,7 @@ pub async fn get_columns(
                 is_auto_increment: is_auto,
                 default_value,
                 character_maximum_length,
+                enum_values,
             }
         })
         .collect())
@@ -240,7 +250,12 @@ pub async fn get_all_columns_batch(
              WHERE tc.constraint_type = 'PRIMARY KEY'
              AND tc.table_schema = c.table_schema
              AND kcu.table_name = c.table_name
-             AND kcu.column_name = c.column_name) > 0 as is_pk
+             AND kcu.column_name = c.column_name) > 0 as is_pk,
+            (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder)
+             FROM pg_enum e
+             JOIN pg_type t ON e.enumtypid = t.oid
+             JOIN pg_namespace n ON t.typnamespace = n.oid
+             WHERE t.typname = c.udt_name AND n.nspname = c.udt_schema) AS enum_values
         FROM information_schema.columns c
         WHERE c.table_schema = $1
         ORDER BY c.table_name, c.ordinal_position
@@ -261,6 +276,10 @@ pub async fn get_all_columns_batch(
             .ok()
             .flatten()
             .and_then(|v| u64::try_from(v).ok());
+        let enum_values: Option<Vec<String>> = row
+            .try_get::<_, Option<Vec<String>>>("enum_values")
+            .ok()
+            .flatten();
 
         let is_auto = is_identity == "YES" || default_val.contains("nextval");
 
@@ -284,6 +303,7 @@ pub async fn get_all_columns_batch(
             is_auto_increment: is_auto,
             default_value,
             character_maximum_length,
+            enum_values,
         };
 
         result
@@ -468,27 +488,66 @@ pub async fn fetch_blob_column_as_data_url(
     Ok(crate::drivers::common::encode_blob_full(&bytes))
 }
 
-async fn get_column_data_type(
+/// Column type metadata used when binding edited cell values.
+struct PgColumnType {
+    /// `information_schema.columns.data_type` (e.g. `integer`, `USER-DEFINED`).
+    data_type: String,
+    /// Qualified, double-quoted type to `CAST` string params to when the column
+    /// is a user-defined type (enum). `None` for built-in types. See
+    /// [`binding::PgValueOptions::user_defined_type`].
+    cast_target: Option<String>,
+}
+
+/// Fetch `data_type` (and, for user-defined types, the qualified type name) for
+/// every column of `schema.table`, keyed by column name. Used by update/insert
+/// so enum columns can be cast and numeric/json columns bound correctly.
+async fn get_table_column_types(
     pool: &deadpool_postgres::Pool,
     schema: &str,
     table: &str,
-    col_name: &str,
-) -> Result<Option<String>, String> {
+) -> Result<std::collections::HashMap<String, PgColumnType>, String> {
     let rows = query_all(
         pool,
-        "SELECT data_type::text, udt_name::text \
+        "SELECT column_name::text, data_type::text, udt_schema::text, udt_name::text \
 FROM information_schema.columns \
-WHERE table_schema = $1 AND table_name = $2 AND column_name = $3 \
-LIMIT 1",
-        &[&schema, &table, &col_name],
+WHERE table_schema = $1 AND table_name = $2",
+        &[&schema, &table],
     )
     .await?;
 
-    Ok(rows.first().map(|row| {
-        row.try_get::<_, String>("data_type")
-            .or_else(|_| row.try_get::<_, String>("udt_name"))
-            .unwrap_or_else(|_| "unknown".to_string())
-    }))
+    let mut map = std::collections::HashMap::with_capacity(rows.len());
+    for row in &rows {
+        let name = match row.try_get::<_, String>("column_name") {
+            Ok(name) => name,
+            Err(_) => continue,
+        };
+        let data_type = row
+            .try_get::<_, String>("data_type")
+            .unwrap_or_else(|_| "unknown".to_string());
+        let cast_target = if data_type == "USER-DEFINED" {
+            match (
+                row.try_get::<_, String>("udt_schema"),
+                row.try_get::<_, String>("udt_name"),
+            ) {
+                (Ok(udt_schema), Ok(udt_name)) => Some(format!(
+                    "\"{}\".\"{}\"",
+                    escape_identifier(&udt_schema),
+                    escape_identifier(&udt_name)
+                )),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        map.insert(
+            name,
+            PgColumnType {
+                data_type,
+                cast_target,
+            },
+        );
+    }
+    Ok(map)
 }
 
 fn json_value_kind(value: &serde_json::Value) -> &'static str {
@@ -577,19 +636,20 @@ pub async fn update_record(
     max_blob_size: u64,
 ) -> Result<u64, String> {
     let pool = get_postgres_pool(params).await?;
-    let column_data_type = match get_column_data_type(&pool, schema, table, col_name).await {
-        Ok(data_type) => data_type,
+    let column_types = match get_table_column_types(&pool, schema, table).await {
+        Ok(types) => types,
         Err(err) => {
             log::debug!(
-                "Could not load PostgreSQL column metadata for {}.{}.{}: {}",
+                "Could not load PostgreSQL column metadata for {}.{}: {}",
                 schema,
                 table,
-                col_name,
                 err
             );
-            None
+            std::collections::HashMap::new()
         }
     };
+    let column_info = column_types.get(col_name);
+    let column_data_type = column_info.map(|c| c.data_type.as_str());
     let new_val_for_context = new_val.clone();
     let pk_map_for_context = pk_map.clone();
 
@@ -606,7 +666,8 @@ pub async fn update_record(
         new_val,
         bound_params.len() + 1,
         PgValueOptions {
-            column_type: column_data_type.as_deref(),
+            column_type: column_data_type,
+            user_defined_type: column_info.and_then(|c| c.cast_target.as_deref()),
             max_blob_size,
             allow_default: true,
         },
@@ -645,7 +706,7 @@ pub async fn update_record(
             &first_pk_val,
             col_name,
             &new_val_for_context,
-            column_data_type.as_deref(),
+            column_data_type,
             &query,
         )
     })
@@ -682,34 +743,32 @@ pub async fn insert_record(
         .await;
     };
 
-    // Fetch column types so json/jsonb columns get JSON-aware binding.
-    let col_types: std::collections::HashMap<String, String> =
-        match get_columns(params, table, schema).await {
-            Ok(cols_meta) => cols_meta
-                .into_iter()
-                .map(|c| (c.name, c.data_type))
-                .collect(),
-            Err(err) => {
-                log::debug!(
-                    "Could not load PostgreSQL column metadata for {}.{}: {}",
-                    schema,
-                    table,
-                    err
-                );
-                std::collections::HashMap::new()
-            }
-        };
+    // Fetch column types so json/jsonb columns get JSON-aware binding and enum
+    // columns are cast rather than bound as bare text params.
+    let col_types = match get_table_column_types(&pool, schema, table).await {
+        Ok(types) => types,
+        Err(err) => {
+            log::debug!(
+                "Could not load PostgreSQL column metadata for {}.{}: {}",
+                schema,
+                table,
+                err
+            );
+            std::collections::HashMap::new()
+        }
+    };
 
     let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::with_capacity(entries.len());
     let mut vals_set: Vec<String> = Vec::with_capacity(entries.len());
 
     for (col_name, val) in entries.drain(..) {
-        let column_type = col_types.get(&col_name).map(|s| s.as_str());
+        let column_info = col_types.get(&col_name);
         let bound = bind_pg_value(
             val,
             params.len() + 1,
             PgValueOptions {
-                column_type,
+                column_type: column_info.map(|c| c.data_type.as_str()),
+                user_defined_type: column_info.and_then(|c| c.cast_target.as_deref()),
                 max_blob_size,
                 allow_default: false,
             },
@@ -1083,7 +1142,12 @@ pub async fn get_view_columns(
              WHERE tc.constraint_type = 'PRIMARY KEY'
              AND tc.table_schema = c.table_schema
              AND kcu.table_name = c.table_name
-             AND kcu.column_name = c.column_name) > 0 as is_pk
+             AND kcu.column_name = c.column_name) > 0 as is_pk,
+            (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder)
+             FROM pg_enum e
+             JOIN pg_type t ON e.enumtypid = t.oid
+             JOIN pg_namespace n ON t.typnamespace = n.oid
+             WHERE t.typname = c.udt_name AND n.nspname = c.udt_schema) AS enum_values
         FROM information_schema.columns c
         WHERE c.table_schema = $1 AND c.table_name = $2
         ORDER BY c.ordinal_position
@@ -1103,6 +1167,10 @@ pub async fn get_view_columns(
                 .ok()
                 .flatten()
                 .and_then(|v| u64::try_from(v).ok());
+            let enum_values: Option<Vec<String>> = r
+                .try_get::<_, Option<Vec<String>>>("enum_values")
+                .ok()
+                .flatten();
 
             let is_auto = is_identity == "YES" || default_val.contains("nextval");
 
@@ -1126,6 +1194,7 @@ pub async fn get_view_columns(
                 is_auto_increment: is_auto,
                 default_value,
                 character_maximum_length,
+                enum_values,
             }
         })
         .collect())
