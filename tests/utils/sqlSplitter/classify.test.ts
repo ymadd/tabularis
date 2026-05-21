@@ -42,6 +42,12 @@ describe('isSelect', () => {
     expect(isSelect('SELECTIVE 1')).toBe(false);
   });
 
+  it('peels leading parentheses so parenthesised SELECTs still classify', () => {
+    expect(isSelect('(SELECT 1)')).toBe(true);
+    expect(isSelect('((SELECT 1))')).toBe(true);
+    expect(isSelect('-- header\n ( SELECT 1 )')).toBe(true);
+  });
+
   it('rejects non-SELECT statements', () => {
     expect(isSelect('INSERT INTO t VALUES (1)')).toBe(false);
     expect(isSelect('CREATE TABLE t (id INT)')).toBe(false);
@@ -78,6 +84,7 @@ describe('isExplainable', () => {
     expect(isExplainable('REPLACE INTO t VALUES (1)')).toBe(true);
     expect(isExplainable('WITH cte AS (SELECT 1) SELECT * FROM cte')).toBe(true);
     expect(isExplainable('TABLE users')).toBe(true);
+    expect(isExplainable('MERGE INTO target USING src ON x = y WHEN MATCHED THEN UPDATE SET a = 1')).toBe(true);
   });
 
   it('returns false for DDL', () => {

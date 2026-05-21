@@ -104,6 +104,57 @@ describe('splitStatements', () => {
       const result = splitQueries(sql, 'mysql');
       expect(result).toEqual(['SELECT 1', 'SELECT 2', 'SELECT 3']);
     });
+
+    it('keeps an inline `-- comment` after DELIMITER out of the delimiter token', () => {
+      // Old regex pulled `[^\n\r]+`, swallowing the comment as part of
+      // the delimiter value. With the new `\S+` rule the delimiter is
+      // the bare `//`, so subsequent `SELECT 1//` actually splits. The
+      // line comment trails inside the following segment, which is the
+      // expected fold behaviour (NEXT-meaningful wins).
+      const sql = [
+        'DELIMITER //  -- switch to slashes',
+        'SELECT 1//',
+        'SELECT 2//',
+      ].join('\n');
+      const result = splitQueries(sql, 'mysql');
+      expect(result).toHaveLength(2);
+      expect(result[0]).toContain('SELECT 1');
+      expect(result[0]).toContain('-- switch to slashes');
+      expect(result[1]).toBe('SELECT 2');
+    });
+  });
+
+  describe('mysql executable conditional comments', () => {
+    it('emits `/*! ... */` as a standalone statement', () => {
+      const sql = '/*!40101 SET NAMES utf8 */;\nSELECT * FROM users;';
+      const result = splitQueries(sql, 'mysql');
+      expect(result).toHaveLength(2);
+      expect(result[0]).toBe('/*!40101 SET NAMES utf8 */');
+      expect(result[1]).toBe('SELECT * FROM users');
+    });
+
+    it('treats a plain block comment normally on mysql', () => {
+      const sql = '/* plain */\nSELECT 1;';
+      const [stmt] = splitStatements(sql, 'mysql');
+      expect(stmt.text).toContain('/* plain */');
+      expect(stmt.text).toContain('SELECT 1');
+    });
+  });
+
+  describe('postgres nested block comments', () => {
+    it('does not split on `;` inside a nested block comment', () => {
+      const sql = '/* outer /* inner ; */ outer */ SELECT 1;';
+      const result = splitQueries(sql, 'postgres');
+      expect(result).toHaveLength(1);
+      expect(result[0]).toContain('SELECT 1');
+    });
+
+    it('mysql still terminates at the first `*/`', () => {
+      // MySQL block comments do not nest; the first `*/` closes.
+      const sql = '/* outer /* inner */ trailing */ SELECT 1';
+      const result = splitQueries(sql, 'mysql');
+      expect(result[0]).toContain('SELECT 1');
+    });
   });
 
   describe('mssql GO separator', () => {
@@ -150,13 +201,17 @@ describe('splitStatements', () => {
   });
 
   describe('range', () => {
-    it('reports source byte offsets for the emitted statement', () => {
+    it('reports source string indices for the emitted statement', () => {
       const sql = 'SELECT 1; SELECT 2';
       const [a, b] = splitStatements(sql);
       expect(a.range.start).toBe(0);
       expect(a.range.end).toBe(8); // up to but excluding `;`
-      expect(b.range.start).toBe(9); // ` SELECT 2`
+      // The space between `;` and `SELECT 2` is whitespace, not part of
+      // the SQL body. range should point at the first non-space char so
+      // sql.slice(range.start, range.end) returns clean SQL.
+      expect(b.range.start).toBe(10);
       expect(b.range.end).toBe(sql.length);
+      expect(sql.slice(b.range.start, b.range.end)).toBe('SELECT 2');
     });
 
     it('excludes a folded trailing comment from range while keeping it in text', () => {
