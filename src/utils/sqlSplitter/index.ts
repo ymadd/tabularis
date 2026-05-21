@@ -65,15 +65,18 @@ export interface DialectOptions {
   readonly lineComments: boolean;
   readonly blockComments: boolean;
   /**
-   * Treat `/*! … *​/` as a meaningful statement instead of a comment.
-   * MySQL/MariaDB evaluates these "executable comments" when the
-   * embedded version directive permits; dump scripts rely on them
-   * being emitted as their own statement.
+   * Treat MySQL/MariaDB conditional comments (the ones opening with
+   * `/*!`) as meaningful statements instead of noop comments. The
+   * server evaluates them when the embedded version directive
+   * permits; dump scripts rely on them being emitted as their own
+   * statement so individual driver calls execute them.
    */
   readonly executableComments: boolean;
   /**
-   * Allow `/* … *​/` to nest. Required for PostgreSQL, which permits
-   * `/* outer /* inner *​/ outer *​/` as one comment.
+   * Allow block comments to nest, as PostgreSQL does. With this off,
+   * the first closing block-comment marker ends the comment; with it
+   * on, the scanner tracks depth and only ends at the matching
+   * outermost marker.
    */
   readonly nestedBlockComments: boolean;
 }
