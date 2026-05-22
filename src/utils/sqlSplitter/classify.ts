@@ -57,10 +57,15 @@ const LEADING_KEYWORD_RE = /^([A-Za-z_][A-Za-z0-9_]*)/;
 const LEADING_PARENS_RE = /^[(\s]+/;
 
 export function leadingKeyword(query: string): string {
-  // Strip leading comments, then leading whitespace and `(` so that
-  // parenthesised queries like `(SELECT 1)` still classify by their
-  // inner keyword.
-  const body = stripLeadingComments(query).replace(LEADING_PARENS_RE, '');
+  // Comments may sit inside the parens (`(\n-- header\nSELECT 1)`),
+  // and parens may sit between leading comments (`/* x */ ( SELECT 1 )`),
+  // so we strip both in a fixed-point loop instead of one pass each.
+  let body = query;
+  for (;;) {
+    const next = stripLeadingComments(body).replace(LEADING_PARENS_RE, '');
+    if (next === body) break;
+    body = next;
+  }
   const match = LEADING_KEYWORD_RE.exec(body);
   return match ? match[1].toUpperCase() : '';
 }
