@@ -33,6 +33,21 @@ export function scanToken(
   }
 
   if (options.lineComments && ch === '-' && source[position + 1] === '-') {
+    // MySQL/MariaDB require a whitespace (or EOF) after `--` for it to
+    // be a comment; otherwise it is the binary subtraction operator
+    // (e.g. `SELECT 1--1` → 2). Other dialects accept `--` regardless.
+    if (options.lineCommentRequiresSpace) {
+      const after = source[position + 2];
+      if (
+        after !== undefined &&
+        after !== ' ' &&
+        after !== '\t' &&
+        after !== '\n' &&
+        after !== '\r'
+      ) {
+        return { kind: 'data', length: 1 };
+      }
+    }
     let end = position + 2;
     while (end < source.length && source[end] !== '\n') end++;
     return { kind: 'lineComment', length: end - position };

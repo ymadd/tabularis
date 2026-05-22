@@ -79,6 +79,14 @@ export interface DialectOptions {
    * outermost marker.
    */
   readonly nestedBlockComments: boolean;
+  /**
+   * MySQL/MariaDB require `--` to be followed by whitespace (or
+   * end-of-line) to be recognised as a line comment, otherwise it is
+   * the binary subtraction operator (e.g. `SELECT 1--1` evaluates to
+   * `2`). PostgreSQL, MSSQL, SQLite and Oracle accept `--` regardless
+   * of what follows.
+   */
+  readonly lineCommentRequiresSpace: boolean;
 }
 
 const STANDARD_QUOTES: ReadonlyArray<QuoteRule> = [
@@ -96,6 +104,7 @@ const POSTGRES: DialectOptions = {
   blockComments: true,
   executableComments: false,
   nestedBlockComments: true,
+  lineCommentRequiresSpace: false,
 };
 
 const MYSQL: DialectOptions = {
@@ -112,6 +121,7 @@ const MYSQL: DialectOptions = {
   blockComments: true,
   executableComments: true,
   nestedBlockComments: false,
+  lineCommentRequiresSpace: true,
 };
 
 const MSSQL: DialectOptions = {
@@ -128,6 +138,7 @@ const MSSQL: DialectOptions = {
   blockComments: true,
   executableComments: false,
   nestedBlockComments: false,
+  lineCommentRequiresSpace: false,
 };
 
 const SQLITE: DialectOptions = {
@@ -145,6 +156,7 @@ const SQLITE: DialectOptions = {
   blockComments: true,
   executableComments: false,
   nestedBlockComments: false,
+  lineCommentRequiresSpace: false,
 };
 
 // Oracle's option shape currently matches GENERIC. They are kept as
@@ -164,6 +176,7 @@ const ORACLE: DialectOptions = {
   blockComments: true,
   executableComments: false,
   nestedBlockComments: false,
+  lineCommentRequiresSpace: false,
 };
 
 const GENERIC: DialectOptions = {
@@ -176,6 +189,7 @@ const GENERIC: DialectOptions = {
   blockComments: true,
   executableComments: false,
   nestedBlockComments: false,
+  lineCommentRequiresSpace: false,
 };
 
 const DIALECT_TABLE: Readonly<Record<Dialect, DialectOptions>> = {
