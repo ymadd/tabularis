@@ -175,6 +175,52 @@ describe('splitStatements', () => {
       const result = splitQueries(sql, 'mssql');
       expect(result).toHaveLength(1);
     });
+
+    it('accepts an optional repeat-count after GO (e.g. `GO 5`)', () => {
+      // sqlcmd/SSMS treat `GO 5` as "run the preceding batch 5 times".
+      // The splitter still emits a single batch boundary; the runner is
+      // responsible for any repetition.
+      const sql = 'SELECT 1\nGO 5\nSELECT 2';
+      const result = splitQueries(sql, 'mssql');
+      expect(result).toEqual(['SELECT 1', 'SELECT 2']);
+    });
+
+    it('still rejects GO followed by a non-numeric token', () => {
+      const sql = 'SELECT 1\nGO foo\nSELECT 2';
+      const result = splitQueries(sql, 'mssql');
+      // Falls through to one big statement because `GO foo` does not
+      // match the batch separator.
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('mysql `--` requires trailing whitespace', () => {
+    it('treats `1--1` as the subtraction operator, not a comment', () => {
+      // MySQL parses `--` as subtraction unless followed by whitespace,
+      // so `SELECT 1--1` is `2`, a single statement, not `SELECT 1`
+      // with a trailing comment.
+      const result = splitQueries('SELECT 1--1', 'mysql');
+      expect(result).toEqual(['SELECT 1--1']);
+    });
+
+    it('still treats `-- ` (with trailing space) as a comment', () => {
+      // The MySQL line-comment rule requires whitespace after `--`,
+      // not its absence. `-- header` followed by `\n` is a normal
+      // comment and folds into the next meaningful statement.
+      const [stmt] = splitStatements('-- header\nSELECT 1', 'mysql');
+      expect(stmt.text).toContain('-- header');
+      expect(stmt.text).toContain('SELECT 1');
+    });
+
+    it('does not apply the rule under postgres (`--` is always a comment)', () => {
+      // Sanity check: the MySQL-only rule must not regress other dialects.
+      // Postgres treats `--1` as a line comment, so the splitter keeps
+      // the source intact as one statement with the trailing comment
+      // folded in.
+      const result = splitQueries('SELECT 1--1', 'postgres');
+      expect(result).toHaveLength(1);
+      expect(result[0]).toContain('SELECT 1');
+    });
   });
 
   describe('statement metadata', () => {

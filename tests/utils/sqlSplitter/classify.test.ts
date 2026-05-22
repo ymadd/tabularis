@@ -48,6 +48,17 @@ describe('isSelect', () => {
     expect(isSelect('-- header\n ( SELECT 1 )')).toBe(true);
   });
 
+  it('peels interleaved parens and comments', () => {
+    // `(` then a comment inside the parens: previously stripLeadingComments
+    // saw `(` first and stopped, so the inner comment leaked into the
+    // keyword match. The fixed-point loop now keeps stripping until both
+    // sides give up.
+    expect(isSelect('( /* note */ SELECT 1 )')).toBe(true);
+    expect(isSelect('(\n-- comment\nSELECT 1\n)')).toBe(true);
+    expect(isSelect('(\n-- comment\n(SELECT 1)\n)')).toBe(true);
+    expect(isSelect('/* a */ ( /* b */ ( SELECT 1 ) )')).toBe(true);
+  });
+
   it('rejects non-SELECT statements', () => {
     expect(isSelect('INSERT INTO t VALUES (1)')).toBe(false);
     expect(isSelect('CREATE TABLE t (id INT)')).toBe(false);
