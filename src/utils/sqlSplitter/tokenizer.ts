@@ -227,7 +227,12 @@ function readCustomDelimiter(source: string, position: number): Token | null {
   return { kind: 'setDelimiter', length: m[0].length, value: m[1] };
 }
 
-const GO_RE = /GO[ \t\r]*(\n|$)/iy;
+// `GO` with an optional repeat-count: `GO`, `GO 5`, `GO\t10`. Native
+// sqlcmd / SSMS execute the preceding batch the given number of times.
+// We treat all three as a single batch separator; the repeat count is
+// discarded at this layer (re-running the batch is a runner concern
+// outside the splitter).
+const GO_RE = /GO(?:[ \t]+\d+)?[ \t\r]*(\n|$)/iy;
 
 function readGoDelimiter(source: string, position: number): Token | null {
   GO_RE.lastIndex = position;
