@@ -9,12 +9,18 @@ export type Dialect =
   | 'generic';
 
 /**
- * String-index span (JavaScript UTF-16 code unit offsets) of the
- * meaningful (non-comment) portion of a statement in the original
- * source. Comments folded into `Statement.text` are NOT included in
- * the range — only the actual SQL body. Use this for Monaco
- * decorations / cursor positioning that should target the real
- * statement and skip over surrounding comment whitespace.
+ * String-index span (JavaScript UTF-16 code unit offsets) of a
+ * statement in the original source. ASCII leading and trailing
+ * whitespace is excluded, and comment-only segments that were folded
+ * into adjacent statements by the splitter are NOT covered (only the
+ * meaningful segment's bounds are reported).
+ *
+ * What is still included in the range: any leading or trailing
+ * comments that live inside the meaningful segment itself, e.g. the
+ * `-- header` in `-- header\nSELECT 1;`. Consumers that need a
+ * strictly comment-free range should re-strip via
+ * `stripLeadingComments` (and a future trailing-comment helper) on
+ * the slice they get from this range.
  *
  * Note: these are JS string indices, not byte offsets. Callers that
  * need byte positions (e.g. a Rust backend) must re-encode.
