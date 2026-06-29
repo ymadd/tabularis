@@ -556,6 +556,49 @@ mod bind_pg_value_tests {
         assert_eq!(bound.sql, "$2");
         assert!(bound.param.is_some());
     }
+
+    #[test]
+    fn geometry_udt_still_uses_wkt_function_not_literal_cast() {
+        // PostGIS geometry columns are also reported as USER-DEFINED, so they
+        // carry a user_defined_type. A WKT value must still bind through
+        // ST_GeomFromText (the geometry handlers run before the UDT cast),
+        // not as CAST($N AS "public"."geometry").
+        let bound = bind_pg_value(
+            serde_json::json!("POINT(1 2)"),
+            1,
+            PgValueOptions {
+                column_type: Some("USER-DEFINED"),
+                user_defined_type: Some("\"public\".\"geometry\""),
+                max_blob_size: 1024,
+                allow_default: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bound.sql, "ST_GeomFromText($1)");
+        assert!(bound.param.is_some());
+    }
+
+    #[test]
+    fn raw_sql_function_on_udt_column_passes_through_unwrapped() {
+        // A raw SQL function entered for a USER-DEFINED column must pass through
+        // untouched, not become CAST('ST_...' AS <type>) — otherwise geometry
+        // function input on the same column would be mangled.
+        let bound = bind_pg_value(
+            serde_json::json!("ST_GeomFromText('POINT(1 2)', 4326)"),
+            1,
+            PgValueOptions {
+                column_type: Some("USER-DEFINED"),
+                user_defined_type: Some("\"public\".\"geometry\""),
+                max_blob_size: 1024,
+                allow_default: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bound.sql, "ST_GeomFromText('POINT(1 2)', 4326)");
+        assert!(bound.param.is_none());
+    }
 }
 
 mod build_pk_predicate_tests {

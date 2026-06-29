@@ -261,3 +261,9 @@ fn parse_check_handles_paren_inside_string_literal() {
         Some(vec!["a)".to_string(), "b".to_string()])
     );
 }
+
+#[test]
+fn parse_check_empty_column_returns_none_without_hanging() {
+    // An empty column name must not spin forever in the scan loop.
+    assert_eq!(parse_sqlite_check_in_values("CREATE TABLE t (x TEXT)", ""), None);
+}

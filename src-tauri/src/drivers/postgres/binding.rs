@@ -296,18 +296,6 @@ fn bind_pg_string(
         return binding;
     }
 
-    // User-defined types (enums) reach here as plain strings. tokio-postgres
-    // cannot bind a String to an enum OID, so wrap the text param in an explicit
-    // cast: PostgreSQL then infers `$N` as text and coerces the label to the
-    // enum type. Authoritative column metadata takes precedence over the
-    // value-shape heuristics below (raw SQL / WKT / UUID / array).
-    if let Some(udt) = options.user_defined_type {
-        return Ok(BoundValue {
-            sql: format!("CAST(${} AS {})", placeholder_idx, udt),
-            param: Some(Box::new(s.to_string())),
-        });
-    }
-
     if is_raw_sql_function(s) {
         return Ok(BoundValue {
             sql: s.to_string(),
@@ -318,6 +306,21 @@ fn bind_pg_string(
     if is_wkt_geometry(s) {
         return Ok(BoundValue {
             sql: format!("ST_GeomFromText(${})", placeholder_idx),
+            param: Some(Box::new(s.to_string())),
+        });
+    }
+
+    // User-defined types (enums, domains, citext, …) reach here as plain
+    // strings. tokio-postgres cannot bind a String to such an OID, so wrap the
+    // text param in an explicit cast and let PostgreSQL coerce it. This runs
+    // AFTER the raw-SQL and WKT handlers on purpose: PostGIS geometry/geography
+    // columns are *also* reported as USER-DEFINED, and their values must still
+    // reach `ST_GeomFromText`/raw-function binding rather than a literal cast.
+    // It runs BEFORE the UUID/array shape heuristics so an enum label that
+    // merely looks like a UUID still casts to its declared type.
+    if let Some(udt) = options.user_defined_type {
+        return Ok(BoundValue {
+            sql: format!("CAST(${} AS {})", placeholder_idx, udt),
             param: Some(Box::new(s.to_string())),
         });
     }

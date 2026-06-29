@@ -1,3 +1,13 @@
+/// Correlated subquery for column-introspection SELECTs that alias
+/// `information_schema.columns` AS `c`: aggregates a user-defined type's enum
+/// labels in declaration order, yielding NULL for non-enum columns. Kept in one
+/// place so the three introspection queries stay in sync.
+pub(super) const PG_ENUM_VALUES_SUBQUERY: &str = "(SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder)
+             FROM pg_enum e
+             JOIN pg_type t ON e.enumtypid = t.oid
+             JOIN pg_namespace n ON t.typnamespace = n.oid
+             WHERE t.typname = c.udt_name AND n.nspname = c.udt_schema) AS enum_values";
+
 /// Extract base type name, e.g. "GEOMETRY(Point, 4326)" -> "GEOMETRY", "VARCHAR(255)" -> "VARCHAR"
 pub(super) fn extract_base_type(data_type: &str) -> String {
     if let Some(idx) = data_type.find('(') {

@@ -10,6 +10,12 @@ fn is_identifier_byte(b: u8) -> bool {
 /// variants of the column name. Returns `None` when no matching pattern is
 /// found or when the IN list is not made of string literals.
 pub(super) fn parse_sqlite_check_in_values(ddl: &str, column: &str) -> Option<Vec<String>> {
+    // An empty needle makes `str::find("")` return `Some(0)` forever, so the
+    // scan below would never advance the cursor. Guard before looping.
+    if column.is_empty() {
+        return None;
+    }
+
     let lower = ddl.to_ascii_lowercase();
     let col_lower = column.to_ascii_lowercase();
     let mut cursor = 0;

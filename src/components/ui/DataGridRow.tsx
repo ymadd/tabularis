@@ -55,7 +55,7 @@ export interface RowCtx {
    * cells edit through a `<select>` instead of free text. `null` when no
    * column metadata is available.
    */
-  columnEnumValuesMap: Map<string, string[] | undefined> | null;
+  columnEnumValuesMap: Map<string, string[]> | null;
   isJsonCellTarget: (colType: string | undefined, value: unknown) => boolean;
   fksByColumn: Map<string, ForeignKey>;
   t: (key: string, opts?: Record<string, unknown>) => string;

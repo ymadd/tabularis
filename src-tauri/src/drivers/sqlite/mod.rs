@@ -173,11 +173,13 @@ pub async fn get_all_columns_batch(
     let mut result: HashMap<String, Vec<TableColumn>> = HashMap::new();
 
     // Fetch CREATE TABLE DDL for every table up front so we can mine CHECK enum
-    // constraints without an extra round-trip per column.
+    // constraints without an extra round-trip per column. This is supplementary
+    // (only used for enum values), so a failure degrades to "no enum info"
+    // rather than aborting the whole batch — matching get_columns' `.ok()`.
     let ddl_rows = sqlx::query("SELECT name, sql FROM sqlite_master WHERE type IN ('table','view')")
         .fetch_all(&pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .unwrap_or_default();
     let ddl_map: HashMap<String, String> = ddl_rows
         .iter()
         .filter_map(|r| {

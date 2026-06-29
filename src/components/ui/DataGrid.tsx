@@ -285,7 +285,7 @@ export const DataGrid = React.memo(
       return new Map(
         columnMetadata
           .filter(
-            (col) =>
+            (col): col is typeof col & { enum_values: string[] } =>
               Array.isArray(col.enum_values) && col.enum_values.length > 0,
           )
           .map((col) => [col.name, col.enum_values] as const),
