@@ -441,7 +441,8 @@ pub async fn save_blob_column_to_file(
 ) -> Result<(), String> {
     let pool = get_postgres_pool(params).await?;
 
-    let (predicate, pk_params) = build_pk_map_predicate(pk_map, 1)?;
+    let pk_types = get_pk_column_types(&pool, schema, table, pk_map).await;
+    let (predicate, pk_params) = build_pk_map_predicate(pk_map, &pk_types, 1)?;
     let query = format!(
         "SELECT \"{}\" FROM \"{}\".\"{}\" WHERE {}",
         escape_identifier(col_name),
@@ -469,7 +470,8 @@ pub async fn fetch_blob_column_as_data_url(
 ) -> Result<String, String> {
     let pool = get_postgres_pool(params).await?;
 
-    let (predicate, pk_params) = build_pk_map_predicate(pk_map, 1)?;
+    let pk_types = get_pk_column_types(&pool, schema, table, pk_map).await;
+    let (predicate, pk_params) = build_pk_map_predicate(pk_map, &pk_types, 1)?;
     let query = format!(
         "SELECT \"{}\" FROM \"{}\".\"{}\" WHERE {}",
         escape_identifier(col_name),
@@ -550,6 +552,25 @@ WHERE table_schema = $1 AND table_name = $2",
     Ok(map)
 }
 
+/// Resolve the declared type of every column in `pk_map`, so each PK member binds
+/// against its real column type (uuid vs varchar etc. — #392). Columns whose type
+/// cannot be loaded are simply omitted, leaving `build_pk_map_predicate` to fall back
+/// to the shape heuristic for them.
+async fn get_pk_column_types(
+    pool: &deadpool_postgres::Pool,
+    schema: &str,
+    table: &str,
+    pk_map: &HashMap<String, serde_json::Value>,
+) -> HashMap<String, String> {
+    let mut types = HashMap::new();
+    for col in pk_map.keys() {
+        if let Ok(Some(t)) = get_column_data_type(pool, schema, table, col).await {
+            types.insert(col.clone(), t);
+        }
+    }
+    types
+}
+
 fn json_value_kind(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
@@ -611,7 +632,8 @@ pub async fn delete_record(
 ) -> Result<u64, String> {
     let pool = get_postgres_pool(params).await?;
 
-    let (predicate, pk_params) = build_pk_map_predicate(pk_map, 1)?;
+    let pk_types = get_pk_column_types(&pool, schema, table, pk_map).await;
+    let (predicate, pk_params) = build_pk_map_predicate(pk_map, &pk_types, 1)?;
     let query = format!(
         "DELETE FROM \"{}\".\"{}\" WHERE {}",
         escape_identifier(schema),
@@ -677,7 +699,9 @@ pub async fn update_record(
         bound_params.push(param);
     }
 
-    let (predicate, pk_params) = build_pk_map_predicate(pk_map, bound_params.len() + 1)?;
+    let pk_types = get_pk_column_types(&pool, schema, table, pk_map).await;
+    let (predicate, pk_params) =
+        build_pk_map_predicate(pk_map, &pk_types, bound_params.len() + 1)?;
     query.push_str(" WHERE ");
     query.push_str(&predicate);
     bound_params.extend(pk_params);
@@ -1200,15 +1224,43 @@ pub async fn get_routines(
     schema: &str,
 ) -> Result<Vec<RoutineInfo>, String> {
     let pool = get_postgres_pool(params).await?;
-    let query = r#"
+
+    // `pg_proc.prokind` was introduced in PostgreSQL 11, replacing the boolean
+    // columns `proisagg` / `proiswindow`. On 9.x and 10 the column does not
+    // exist, so referencing it fails at parse time (SQLSTATE 42703). Pick the
+    // query based on the server version.
+    let server_version_num: i32 = query_one(
+        &pool,
+        "SELECT current_setting('server_version_num')::int4 AS v",
+        &[],
+    )
+    .await?
+    .try_get("v")
+    .unwrap_or(0);
+
+    let query = if server_version_num >= 110000 {
+        r#"
             SELECT proname, prokind
             FROM pg_proc
             WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)
             AND prokind IN ('f', 'p')
             ORDER BY proname
-        "#;
+        "#
+    } else {
+        // Pre-11: procedures don't exist; exclude aggregates and window
+        // functions and report everything else as a plain function ('f').
+        // Cast to the internal "char" type so it maps to i8 like prokind.
+        r#"
+            SELECT proname, 'f'::"char" AS prokind
+            FROM pg_proc
+            WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)
+            AND NOT proisagg
+            AND NOT proiswindow
+            ORDER BY proname
+        "#
+    };
 
-    let rows = query_all(&pool, &query, &[&schema]).await?;
+    let rows = query_all(&pool, query, &[&schema]).await?;
 
     Ok(rows
         .iter()
